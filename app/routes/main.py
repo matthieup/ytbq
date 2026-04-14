@@ -10,6 +10,7 @@ from app.config import (
     ALLOW_MULTIPLE_VIDEOS,
     MULTIPLE_VIDEOS_LOCKED,
 )
+from pydantic import BaseModel
 import qrcode
 import io
 import httpx
@@ -280,7 +281,31 @@ async def clear_queue():
     return {"success": True}
 
 
+class ReorderRequest(BaseModel):
+    from_index: int
+    to_index: int
+
+
+@router.post("/api/queue/reorder")
+async def reorder_queue(request: ReorderRequest):
+    success = await queue_service.reorder_queue(request.from_index, request.to_index)
+    return {"success": success}
+
+
 @router.get("/api/queue")
 async def get_queue():
     state = await queue_service.get_state()
     return state
+
+
+@router.get("/api/play-counts")
+async def get_play_counts():
+    return queue_service._play_counts
+
+
+@router.get("/api/play-counts/{video_id}")
+async def get_video_play_count(video_id: str):
+    count_data = queue_service._play_counts.get(video_id)
+    if count_data:
+        return count_data
+    return {"video_id": video_id, "count": 0}

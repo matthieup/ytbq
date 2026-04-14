@@ -88,10 +88,20 @@ function updateQueueUI(state) {
         currentTitle.textContent = state.current.title;
         currentChannel.textContent = state.current.channel || '';
         currentVideoId = state.current.id;
+        if (state.current.play_count) {
+            const playCountEl = document.getElementById('currentPlayCount');
+            if (playCountEl) {
+                playCountEl.textContent = `Played ${state.current.play_count}x`;
+            }
+        }
     } else {
         currentTitle.textContent = 'No video playing';
         currentChannel.textContent = '';
         currentVideoId = null;
+        const playCountEl = document.getElementById('currentPlayCount');
+        if (playCountEl) {
+            playCountEl.textContent = '';
+        }
     }
 
     if (state.items && state.items.length > 0) {
@@ -106,12 +116,13 @@ function updateQueueUI(state) {
                 ${state.current ? 'Now Playing' : 'Start Playing'}
             </button>
             ${state.items.map((item, index) => `
-                <div class="queue-item ${index === 0 && !state.current ? 'next-up' : ''}" data-index="${index}" data-id="${item.id}">
+                <div class="queue-item ${index === 0 && !state.current ? 'next-up' : ''}" data-index="${index}" data-id="${item.id}" draggable="true">
                     <img class="queue-item-thumb" src="${item.thumbnail}" alt="${item.title}">
                     <div class="queue-item-info">
                         <div class="queue-item-title">${item.title}</div>
                         <div class="queue-item-meta">
                             ${item.channel ? `<span class="queue-item-channel">${item.channel}</span>` : ''}
+                            ${item.duration ? `<span class="queue-item-duration">${item.duration}</span>` : ''}
                             ${item.added_by ? `<span class="queue-item-added-by">by ${item.added_by}</span>` : ''}
                         </div>
                     </div>
@@ -128,6 +139,7 @@ function updateQueueUI(state) {
                 </div>
             `).join('')}
         `;
+        setupDragAndDrop();
     } else {
         queueList.innerHTML = `
             <div class="empty-queue">
@@ -341,6 +353,24 @@ function setupControls() {
         }
     }
 
+    const themeToggle = document.getElementById('themeToggle');
+    if (themeToggle) {
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme === 'light') {
+            document.documentElement.setAttribute('data-theme', 'light');
+            themeToggle.checked = true;
+        }
+        themeToggle.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                document.documentElement.setAttribute('data-theme', 'light');
+                localStorage.setItem('theme', 'light');
+            } else {
+                document.documentElement.removeAttribute('data-theme');
+                localStorage.setItem('theme', 'dark');
+            }
+        });
+    }
+
     const clearQueueBtn = document.getElementById('clearQueueBtn');
     if (clearQueueBtn) {
         clearQueueBtn.addEventListener('click', async () => {
@@ -353,6 +383,61 @@ function setupControls() {
     }
 
     setupMainSearch();
+}
+
+function setupDragAndDrop() {
+    const queueItems = document.querySelectorAll('.queue-item');
+    let draggedItem = null;
+
+    queueItems.forEach(item => {
+        item.addEventListener('dragstart', (e) => {
+            draggedItem = item;
+            item.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+
+        item.addEventListener('dragend', () => {
+            item.classList.remove('dragging');
+            document.querySelectorAll('.queue-item').forEach(i => i.classList.remove('drag-over'));
+        });
+
+        item.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const draggingItem = document.querySelector('.dragging');
+            if (draggingItem && item !== draggingItem) {
+                item.classList.add('drag-over');
+            }
+        });
+
+        item.addEventListener('dragleave', () => {
+            item.classList.remove('drag-over');
+        });
+
+        item.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            item.classList.remove('drag-over');
+            
+            if (draggedItem && draggedItem !== item) {
+                const fromIndex = parseInt(draggedItem.dataset.index);
+                const toIndex = parseInt(item.dataset.index);
+                
+                if (!isNaN(fromIndex) && !isNaN(toIndex)) {
+                    await reorderQueue(fromIndex, toIndex);
+                }
+            }
+        });
+    });
+}
+
+async function reorderQueue(fromIndex, toIndex) {
+    try {
+        await fetch('/api/queue/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ from_index: fromIndex, to_index: toIndex })
+        });
+    } catch (error) {}
 }
 
 function setupMainSearch() {
@@ -386,7 +471,7 @@ async function searchVideos(query) {
         resultsContainer.innerHTML = `
             <div class="results-list">
                 ${videos.map(video => `
-                    <div class="result-item" data-id="${video.id}">
+                    <div class="result-item" data-id="${video.id}" data-duration="${video.duration || ''}">
                         <div class="result-thumb">
                             <img src="${video.thumbnail}" alt="${escapeHtml(video.title)}">
                             ${video.duration ? `<span class="result-duration">${video.duration}</span>` : ''}
@@ -431,6 +516,7 @@ async function addToQueue(videoId, element) {
     const title = element.querySelector('.result-title').textContent;
     const thumbnail = element.querySelector('.result-thumb img').src;
     const channel = element.querySelector('.result-channel').textContent;
+    const duration = element.dataset.duration || '';
 
     try {
         const response = await fetch('/api/queue', {
@@ -443,6 +529,7 @@ async function addToQueue(videoId, element) {
                 title: title,
                 thumbnail: thumbnail,
                 channel: channel,
+                duration: duration,
             }),
         });
 

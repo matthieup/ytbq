@@ -32,8 +32,16 @@ class QueueItem(BaseModel):
     added_at: datetime = datetime.now()
     added_by: Optional[str] = None
     user_id: Optional[str] = None
+    play_count: Optional[int] = None
 
 
 class QueueState(BaseModel):
     current: Optional[QueueItem] = None
     items: List[QueueItem] = []
+
+
+class PlayCount(BaseModel):
+    video_id: str
+    title: str
+    count: int
+    last_played: Optional[datetime] = None

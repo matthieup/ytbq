@@ -1,5 +1,6 @@
 from typing import List, Optional
-from app.models.schemas import QueueItem, QueueState
+from app.models.schemas import QueueItem, QueueState, PlayCount
+from datetime import datetime
 import asyncio
 import json
 import os
@@ -7,13 +8,16 @@ import os
 
 class QueueService:
     QUEUE_FILE = "queue_state.json"
+    PLAY_COUNTS_FILE = "play_counts.json"
 
     def __init__(self):
         self._queue: List[QueueItem] = []
         self._current: Optional[QueueItem] = None
         self._connections: List = []
         self._lock = asyncio.Lock()
+        self._play_counts: dict = {}
         self._load_state()
+        self._load_play_counts()
 
     def _load_state(self):
         if os.path.exists(self.QUEUE_FILE):
@@ -26,6 +30,21 @@ class QueueService:
                         self._current = QueueItem(**data["current"])
             except Exception as e:
                 pass
+
+    def _load_play_counts(self):
+        if os.path.exists(self.PLAY_COUNTS_FILE):
+            try:
+                with open(self.PLAY_COUNTS_FILE, "r") as f:
+                    self._play_counts = json.load(f)
+            except Exception as e:
+                self._play_counts = {}
+
+    def _save_play_counts(self):
+        try:
+            with open(self.PLAY_COUNTS_FILE, "w") as f:
+                json.dump(self._play_counts, f, default=str)
+        except Exception as e:
+            pass
 
     def _save_state(self):
         try:
@@ -78,8 +97,10 @@ class QueueService:
             else:
                 self._current = None
                 result = None
-        self._save_state()
-        await self.broadcast_update()
+        if result:
+            self._increment_play_count(result)
+            self._save_state()
+            await self.broadcast_update()
         return result
 
     async def play_at_index(self, index: int) -> Optional[QueueItem]:
@@ -90,9 +111,24 @@ class QueueService:
             else:
                 result = None
         if result:
+            self._increment_play_count(result)
             self._save_state()
             await self.broadcast_update()
         return result
+
+    def _increment_play_count(self, video: QueueItem):
+        video_id = video.id
+        if video_id not in self._play_counts:
+            self._play_counts[video_id] = {
+                "video_id": video_id,
+                "title": video.title,
+                "count": 0,
+                "last_played": None,
+            }
+        self._play_counts[video_id]["count"] += 1
+        self._play_counts[video_id]["last_played"] = datetime.now().isoformat()
+        video.play_count = self._play_counts[video_id]["count"]
+        self._save_play_counts()
 
     async def get_queue(self) -> QueueState:
         async with self._lock:
@@ -138,6 +174,19 @@ class QueueService:
                 if item.user_id == user_id:
                     return True
             return False
+
+    async def reorder_queue(self, from_index: int, to_index: int) -> bool:
+        async with self._lock:
+            if 0 <= from_index < len(self._queue) and 0 <= to_index < len(self._queue):
+                item = self._queue.pop(from_index)
+                self._queue.insert(to_index, item)
+                result = True
+            else:
+                result = False
+        if result:
+            self._save_state()
+            await self.broadcast_update()
+        return result
 
 
 queue_service = QueueService()

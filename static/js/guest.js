@@ -113,7 +113,7 @@ async function searchVideos(query) {
         }
 
         resultsList.innerHTML = videos.map(video => `
-            <div class="result-item" data-id="${video.id}" onclick="addToQueue('${video.id}', '${escapeHtml(video.title)}', '${video.thumbnail}', '${escapeHtml(video.channel || '')}')">
+            <div class="result-item" data-id="${video.id}" data-duration="${video.duration || ''}" onclick="addToQueue('${video.id}', '${escapeHtml(video.title)}', '${video.thumbnail}', '${escapeHtml(video.channel || '')}', '${video.duration || ''}')">
                 <div class="result-thumb">
                     <img src="${video.thumbnail}" alt="${escapeHtml(video.title)}">
                     ${video.duration ? `<span class="result-duration">${video.duration}</span>` : ''}
@@ -135,7 +135,7 @@ async function searchVideos(query) {
     }
 }
 
-async function addToQueue(id, title, thumbnail, channel) {
+async function addToQueue(id, title, thumbnail, channel, duration) {
     const item = document.querySelector(`.result-item[data-id="${id}"]`);
     if (item.classList.contains('added')) return;
 
@@ -150,6 +150,7 @@ async function addToQueue(id, title, thumbnail, channel) {
                 title: title,
                 thumbnail: thumbnail,
                 channel: channel,
+                duration: duration,
                 added_by: userName,
                 user_id: userId,
             }),
