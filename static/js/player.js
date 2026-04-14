@@ -5,6 +5,11 @@ let currentQuality = null;
 let allowMultipleVideos = true;
 let cache = new Map();
 let preloadingVideoId = null;
+let lastPlayNextCall = 0;
+let stallRecoveryTimeout = null;
+let lastProgress = { time: 0, timestamp: 0 };
+let stallCount = 0;
+let maxStallRetries = 3;
 
 function init() {
     player = videojs('videoPlayer', {
@@ -28,10 +33,14 @@ function init() {
     player.on('error', function(e) {
         const error = player.error();
         console.error('Video.js error:', error);
+        if (error && error.code === 3) {
+            playNext();
+        }
     });
     
     player.on('loadstart', function() {
         console.log('Load started for:', currentVideoId);
+        stallCount = 0;
     });
     
     player.on('loadeddata', function() {
@@ -40,6 +49,47 @@ function init() {
     
     player.on('playing', function() {
         console.log('Now playing:', currentVideoId);
+        stallCount = 0;
+        clearStallRecovery();
+    });
+    
+    player.on('progress', function() {
+        const currentTime = player.currentTime();
+        const now = Date.now();
+        if (currentTime > 0) {
+            lastProgress = { time: currentTime, timestamp: now };
+        }
+    });
+    
+    player.on('timeupdate', function() {
+        const currentTime = player.currentTime();
+        const now = Date.now();
+        if (currentTime > 0) {
+            lastProgress = { time: currentTime, timestamp: now };
+        }
+    });
+    
+    player.on('waiting', function() {
+        console.log('Player waiting/buffering for:', currentVideoId);
+        scheduleStallRecovery();
+    });
+    
+    player.on('canplay', function() {
+        console.log('Player can play:', currentVideoId);
+        clearStallRecovery();
+    });
+    
+    player.on('stalled', function() {
+        console.log('Player stalled for:', currentVideoId);
+        scheduleStallRecovery();
+    });
+    
+    player.on('suspend', function() {
+        console.log('Player suspended for:', currentVideoId);
+    });
+    
+    player.on('abort', function() {
+        console.log('Player abort for:', currentVideoId);
     });
     
     if (typeof window.VIDEO_QUALITY !== 'undefined') {
@@ -51,6 +101,86 @@ function init() {
     
     connectWebSocket();
     setupControls();
+}
+
+function scheduleStallRecovery() {
+    clearStallRecovery();
+    stallRecoveryTimeout = setTimeout(() => {
+        attemptStallRecovery();
+    }, 5000);
+}
+
+function clearStallRecovery() {
+    if (stallRecoveryTimeout) {
+        clearTimeout(stallRecoveryTimeout);
+        stallRecoveryTimeout = null;
+    }
+}
+
+function attemptStallRecovery() {
+    if (!player || player.paused()) return;
+    
+    const now = Date.now();
+    const timeSinceProgress = now - lastProgress.timestamp;
+    
+    if (timeSinceProgress < 3000) return;
+    
+    stallCount++;
+    console.log(`Stall recovery attempt ${stallCount}/${maxStallRetries} for:`, currentVideoId);
+    
+    if (stallCount > maxStallRetries) {
+        console.log('Max stall retries reached, skipping to next video');
+        stallCount = 0;
+        playNext();
+        return;
+    }
+    
+    const currentTime = player.currentTime();
+    const duration = player.duration();
+    
+    if (duration > 0 && currentTime >= duration - 1) {
+        console.log('Near end of video, treating as ended');
+        playNext();
+        return;
+    }
+    
+    try {
+        player.currentTime(currentTime + 0.1);
+        const playPromise = player.play();
+        if (playPromise !== undefined) {
+            playPromise.catch(error => {
+                console.log('Play failed during stall recovery:', error);
+                if (stallCount >= 2) {
+                    reloadCurrentVideo();
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Stall recovery error:', error);
+    }
+}
+
+function reloadCurrentVideo() {
+    if (!currentVideoId) return;
+    
+    console.log('Reloading current video:', currentVideoId);
+    const savedTime = player.currentTime();
+    
+    player.reset();
+    let proxyUrl = `/api/proxy/${currentVideoId}`;
+    if (currentQuality) {
+        proxyUrl += `?quality=${currentQuality}`;
+    }
+    player.src({ src: proxyUrl, type: 'video/mp4' });
+    
+    player.one('loadedmetadata', function() {
+        if (savedTime > 0) {
+            player.currentTime(savedTime);
+        }
+        player.play().catch(e => console.log('Play after reload failed:', e));
+    });
+    
+    player.load();
 }
 
 function connectWebSocket() {
@@ -173,20 +303,36 @@ async function preloadNextVideo(video) {
 }
 
 async function playNext() {
+    const now = Date.now();
+    if (now - lastPlayNextCall < 2000) {
+        console.log('playNext: debounced, called too recently');
+        return;
+    }
+    lastPlayNextCall = now;
+    stallCount = 0;
+    clearStallRecovery();
+    
     try {
         const response = await fetch('/api/next', { method: 'POST' });
         const data = await response.json();
         
         if (data.video) {
             await loadAndPlay(data.video);
+        } else {
+            player.reset();
+            await fetch('/api/current/clear', { method: 'POST' });
         }
     } catch (error) {
-        // Silently fail
+        console.error('playNext error:', error);
     }
 }
 
 async function loadAndPlay(video) {
     try {
+        player.reset();
+        stallCount = 0;
+        clearStallRecovery();
+        
         let cached = cache.get(video.id);
         if (cached) {
             player.src(cached);
@@ -213,7 +359,14 @@ async function loadAndPlay(video) {
         }
     } catch (error) {
         console.error('Playback error:', error);
-        setTimeout(() => playNext(), 1000);
+        stallCount++;
+        if (stallCount <= maxStallRetries) {
+            console.log(`Retrying playback (attempt ${stallCount}/${maxStallRetries})`);
+            setTimeout(() => loadAndPlay(video), 1000);
+        } else {
+            stallCount = 0;
+            setTimeout(() => playNext(), 1000);
+        }
     }
 }
 
@@ -443,6 +596,7 @@ async function reorderQueue(fromIndex, toIndex) {
 function setupMainSearch() {
     const form = document.getElementById('mainSearchForm');
     const input = document.getElementById('mainSearchInput');
+    const clearBtn = document.getElementById('clearMainSearchBtn');
 
     if (!form || !input) return;
 
@@ -453,6 +607,19 @@ function setupMainSearch() {
             await searchVideos(query);
         }
     });
+    
+    if (clearBtn) {
+        input.addEventListener('input', () => {
+            clearBtn.style.display = input.value ? 'flex' : 'none';
+        });
+        
+        clearBtn.addEventListener('click', () => {
+            input.value = '';
+            clearBtn.style.display = 'none';
+            document.getElementById('mainSearchResults').innerHTML = '';
+            input.focus();
+        });
+    }
 }
 
 async function searchVideos(query) {

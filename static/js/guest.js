@@ -89,6 +89,7 @@ function updateQueueUI(state) {
 function setupSearch() {
     const form = document.getElementById('searchForm');
     const input = document.getElementById('searchInput');
+    const clearBtn = document.getElementById('clearSearchBtn');
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -96,6 +97,17 @@ function setupSearch() {
         if (query) {
             await searchVideos(query);
         }
+    });
+    
+    input.addEventListener('input', () => {
+        clearBtn.style.display = input.value ? 'flex' : 'none';
+    });
+    
+    clearBtn.addEventListener('click', () => {
+        input.value = '';
+        clearBtn.style.display = 'none';
+        document.getElementById('resultsList').innerHTML = '';
+        input.focus();
     });
 }
 

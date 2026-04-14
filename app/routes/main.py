@@ -275,6 +275,12 @@ async def get_next_video():
     return {"video": None}
 
 
+@router.post("/api/current/clear")
+async def clear_current():
+    await queue_service.clear_current()
+    return {"success": True}
+
+
 @router.post("/api/queue/clear")
 async def clear_queue():
     await queue_service.clear_queue()

@@ -4,6 +4,7 @@ from datetime import datetime
 import asyncio
 import json
 import os
+import time
 
 
 class QueueService:
@@ -16,6 +17,7 @@ class QueueService:
         self._connections: List = []
         self._lock = asyncio.Lock()
         self._play_counts: dict = {}
+        self._last_next_call = 0
         self._load_state()
         self._load_play_counts()
 
@@ -90,6 +92,11 @@ class QueueService:
         return result
 
     async def get_next_video(self) -> Optional[QueueItem]:
+        now = time.time()
+        if now - self._last_next_call < 2:
+            return None
+        self._last_next_call = now
+
         async with self._lock:
             if self._queue:
                 self._current = self._queue.pop(0)
@@ -99,9 +106,15 @@ class QueueService:
                 result = None
         if result:
             self._increment_play_count(result)
-            self._save_state()
-            await self.broadcast_update()
+        self._save_state()
+        await self.broadcast_update()
         return result
+
+    async def clear_current(self):
+        async with self._lock:
+            self._current = None
+        self._save_state()
+        await self.broadcast_update()
 
     async def play_at_index(self, index: int) -> Optional[QueueItem]:
         async with self._lock:

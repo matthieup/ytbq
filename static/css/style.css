@@ -661,6 +661,19 @@ body {
     height: 24px;
 }
 
+.clear-search-btn {
+    background: var(--bg-tertiary) !important;
+}
+
+.clear-search-btn:hover {
+    background: var(--border) !important;
+}
+
+.clear-search-btn svg {
+    width: 20px !important;
+    height: 20px !important;
+}
+
 .results-section {
     margin-bottom: 20px;
 }
