@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}YTBQ - Main Display{% endblock %}
+
+{% block extra_head %}
+{% endblock %}
+
+{% block content %}
+<div class="main-container">
+    <div class="player-section">
+        <div class="now-playing" id="nowPlaying">
+            <h2 id="currentTitle">No video playing</h2>
+            <p id="currentChannel"></p>
+        </div>
+        
+        <div class="video-wrapper">
+            <video id="videoPlayer" class="video-js vjs-big-play-centered vjs-theme-fantasy" controls preload="auto">
+                <p class="vjs-no-js">
+                    To view this video please enable JavaScript, and consider upgrading to a web browser that supports HTML5 video
+                </p>
+            </video>
+        </div>
+        
+        <div class="controls">
+            <button class="control-btn" id="playPauseBtn" title="Play/Pause">
+                <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z"/>
+                </svg>
+                <svg id="pauseIcon" viewBox="0 0 24 24" fill="currentColor" style="display: none;">
+                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+                </svg>
+            </button>
+            <div class="volume-control">
+                <svg viewBox="0 0 24 24" fill="currentColor" class="volume-icon">
+                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.41-2.5-4.25v8.5c1.48-.84 2.5-2.48 2.5-4.25zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                </svg>
+                <input type="range" id="volumeSlider" min="0" max="100" value="80" class="volume-slider">
+            </div>
+            <button class="control-btn" id="fullscreenBtn" title="Fullscreen">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+                </svg>
+            </button>
+            <button class="control-btn" id="skipBtn" title="Skip to next">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
+                </svg>
+            </button>
+            <div class="quality-control">
+                <select id="qualitySelect" class="quality-select" title="Video Quality">
+                    <option value="2160">4K</option>
+                    <option value="1080">1080p</option>
+                    <option value="720">720p</option>
+                    <option value="480">480p</option>
+                    <option value="360">360p</option>
+                </select>
+            </div>
+            <div class="toggle-control">
+                <label class="toggle-label">
+                    <input type="checkbox" id="multipleVideosToggle" class="toggle-input">
+                    <span class="toggle-switch"></span>
+                    <span class="toggle-text">Multi-add</span>
+                </label>
+            </div>
+        </div>
+        
+        <div class="search-container">
+            <form class="search-form" id="mainSearchForm">
+                <input type="text" id="mainSearchInput" placeholder="Search YouTube..." autocomplete="off">
+                <button type="submit">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                    </svg>
+                </button>
+            </form>
+            <div class="search-results" id="mainSearchResults"></div>
+        </div>
+    </div>
+    
+    <div class="queue-section">
+        <div class="queue-header">
+            <h2>Queue (<span id="queueCount">0</span>)</h2>
+            <button class="clear-queue-btn" id="clearQueueBtn" title="Clear queue">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                </svg>
+                Clear
+            </button>
+        </div>
+        <div class="qr-inline">
+            <img src="/qr" alt="Scan to join" class="qr-inline-img">
+            <p class="qr-inline-text">Scan to add videos</p>
+        </div>
+        <div class="queue-list" id="queueList">
+            <div class="empty-queue">
+                <p>No videos in queue</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/player.js"></script>
+<script>
+    window.JOIN_URL = "{{ join_url }}";
+    window.VIDEO_QUALITY = {{ video_quality }};
+    window.ALLOW_MULTIPLE_VIDEOS = {{ allow_multiple_videos|lower }};
+    window.MULTIPLE_VIDEOS_LOCKED = {{ multiple_videos_locked|lower }};
+</script>
+{% endblock %}
