@@ -10,8 +10,11 @@ let stallRecoveryTimeout = null;
 let lastProgress = { time: 0, timestamp: 0 };
 let stallCount = 0;
 let maxStallRetries = 3;
+let isPlaying = false;
 
 function init() {
+    fetch('/api/current/clear', { method: 'POST' });
+    
     player = videojs('videoPlayer', {
         controls: true,
         autoplay: false,
@@ -28,7 +31,10 @@ function init() {
         },
     });
 
-    player.on('ended', playNext);
+    player.on('ended', function() {
+        console.log('Video ended event fired for:', currentVideoId);
+        playNext();
+    });
     
     player.on('error', function(e) {
         const error = player.error();
@@ -51,6 +57,19 @@ function init() {
         console.log('Now playing:', currentVideoId);
         stallCount = 0;
         clearStallRecovery();
+        isPlaying = true;
+        preloadNextInQueue();
+    });
+    
+    player.on('pause', function() {
+        console.log('Paused:', currentVideoId);
+        isPlaying = false;
+    });
+    
+    player.on('ended', function() {
+        console.log('Video ended event fired for:', currentVideoId);
+        isPlaying = false;
+        playNext();
     });
     
     player.on('progress', function() {
@@ -63,9 +82,16 @@ function init() {
     
     player.on('timeupdate', function() {
         const currentTime = player.currentTime();
+        const duration = player.duration();
         const now = Date.now();
         if (currentTime > 0) {
             lastProgress = { time: currentTime, timestamp: now };
+        }
+        
+        if (duration > 0 && currentTime >= duration - 0.5 && !player.paused()) {
+            console.log('Video near end via timeupdate, triggering playNext');
+            player.pause();
+            playNext();
         }
     });
     
@@ -235,18 +261,20 @@ function updateQueueUI(state) {
     }
 
     if (state.items && state.items.length > 0) {
+        queueItems = state.items;
         if (!state.current) {
             preloadNextVideo(state.items[0]);
         }
+        const showAsPlaying = state.current !== null;
         queueList.innerHTML = `
-            <button class="start-playing-btn" onclick="playNext()" ${state.current ? 'disabled style="opacity:0.5"' : ''}>
+            <button class="start-playing-btn" onclick="playNext()" ${showAsPlaying ? 'disabled style="opacity:0.5"' : ''}>
                 <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
                     <path d="M8 5v14l11-7z"/>
                 </svg>
-                ${state.current ? 'Now Playing' : 'Start Playing'}
+                ${showAsPlaying ? 'Now Playing' : 'Start Playing'}
             </button>
             ${state.items.map((item, index) => `
-                <div class="queue-item ${index === 0 && !state.current ? 'next-up' : ''}" data-index="${index}" data-id="${item.id}" draggable="true">
+                <div class="queue-item ${index === 0 && !showAsPlaying ? 'next-up' : ''}" data-index="${index}" data-id="${item.id}" draggable="true">
                     <img class="queue-item-thumb" src="${item.thumbnail}" alt="${item.title}">
                     <div class="queue-item-info">
                         <div class="queue-item-title">${item.title}</div>
@@ -271,6 +299,7 @@ function updateQueueUI(state) {
         `;
         setupDragAndDrop();
     } else {
+        queueItems = [];
         queueList.innerHTML = `
             <div class="empty-queue">
                 <p>No videos in queue</p>
@@ -298,7 +327,15 @@ async function preloadNextVideo(video) {
             cache.set(video.id, { src: proxyUrl, type: 'video/mp4' });
         }
     } catch (error) {
-        // Silently fail preloading
+        preloadingVideoId = null;
+    }
+}
+
+let queueItems = [];
+
+function preloadNextInQueue() {
+    if (queueItems.length > 0) {
+        preloadNextVideo(queueItems[0]);
     }
 }
 
@@ -466,14 +503,34 @@ function setupControls() {
     }
 
     if (volumeSlider) {
+        const savedVolume = localStorage.getItem('ytbq_volume');
+        const savedMuted = localStorage.getItem('ytbq_muted');
+        
+        if (savedVolume !== null) {
+            player.volume(parseFloat(savedVolume));
+            volumeSlider.value = parseFloat(savedVolume) * 100;
+        } else {
+            player.volume(volumeSlider.value / 100);
+        }
+        
+        if (savedMuted === 'true') {
+            player.muted(true);
+        }
+        
         volumeSlider.addEventListener('input', (e) => {
             const vol = e.target.value / 100;
             player.volume(vol);
+            localStorage.setItem('ytbq_volume', vol);
             if (vol > 0) {
                 player.muted(false);
+                localStorage.setItem('ytbq_muted', 'false');
             }
         });
-        player.volume(volumeSlider.value / 100);
+        
+        player.on('volumechange', () => {
+            localStorage.setItem('ytbq_volume', player.volume());
+            localStorage.setItem('ytbq_muted', player.muted());
+        });
     }
 
     if (qualitySelect) {
