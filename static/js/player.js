@@ -12,6 +12,9 @@ let lastProgress = { time: 0, timestamp: 0 };
 let stallCount = 0;
 let maxStallRetries = 3;
 let isPlaying = false;
+let bufferCheckInterval = null;
+let lowBufferCount = 0;
+let maxLowBufferRetries = 2;
 
 let isFullscreen = false;
 
@@ -28,6 +31,8 @@ function init() {
             vhs: {
                 overrideNative: true,
                 enableLowInitialPlaylist: true,
+                smoothQualityChange: true,
+                fastQualityChange: true,
             },
             nativeAudioTracks: false,
             nativeVideoTracks: false,
@@ -36,14 +41,51 @@ function init() {
 
     player.on('ended', function() {
         console.log('Video ended event fired for:', currentVideoId);
+        if (currentVideoId) {
+            fetch(`/api/cache/${currentVideoId}`, { method: 'DELETE' })
+                .then(() => console.log('Cached video removed:', currentVideoId))
+                .catch(err => console.error('Failed to remove cache:', err));
+        }
         playNext();
     });
+    
+    let errorRetryCount = 0;
+    let lastErrorVideoId = null;
     
     player.on('error', function(e) {
         const error = player.error();
         console.error('Video.js error:', error);
-        if (error && error.code === 3) {
-            playNext();
+        
+        if (error && (error.code === 3 || error.code === 4)) {
+            if (lastErrorVideoId === currentVideoId) {
+                errorRetryCount++;
+            } else {
+                errorRetryCount = 1;
+                lastErrorVideoId = currentVideoId;
+            }
+            
+            if (errorRetryCount <= 2) {
+                console.log(`Retrying video due to ${error.code === 3 ? 'decode' : 'source'} error (attempt ${errorRetryCount})`);
+                if (errorRetryCount === 1 && currentQuality !== 720) {
+                    console.log('Falling back to 720p quality');
+                    currentQuality = 720;
+                    const qualitySelect = document.getElementById('qualitySelect');
+                    if (qualitySelect) {
+                        qualitySelect.value = '720';
+                    }
+                }
+                setTimeout(() => reloadCurrentVideo(), 500);
+            } else {
+                console.log('Max retries reached for decode error, skipping to next');
+                if (currentVideoId) {
+                    fetch(`/api/cache/${currentVideoId}`, { method: 'DELETE' }).catch(() => {});
+                }
+                errorRetryCount = 0;
+                lastErrorVideoId = null;
+                currentVideoId = null;
+                player.reset();
+                setTimeout(() => playNext(), 500);
+            }
         }
     });
     
@@ -59,19 +101,24 @@ function init() {
     player.on('playing', function() {
         console.log('Now playing:', currentVideoId);
         stallCount = 0;
+        lowBufferCount = 0;
         clearStallRecovery();
         isPlaying = true;
+        startBufferMonitoring();
         preloadNextInQueue();
+        downloadNextVideo();
     });
     
     player.on('pause', function() {
         console.log('Paused:', currentVideoId);
         isPlaying = false;
+        stopBufferMonitoring();
     });
     
     player.on('ended', function() {
         console.log('Video ended event fired for:', currentVideoId);
         isPlaying = false;
+        stopBufferMonitoring();
         playNext();
     });
     
@@ -149,6 +196,52 @@ function clearStallRecovery() {
     }
 }
 
+function startBufferMonitoring() {
+    stopBufferMonitoring();
+    bufferCheckInterval = setInterval(checkBufferHealth, 2000);
+}
+
+function stopBufferMonitoring() {
+    if (bufferCheckInterval) {
+        clearInterval(bufferCheckInterval);
+        bufferCheckInterval = null;
+    }
+}
+
+function checkBufferHealth() {
+    if (!player || player.paused() || !currentVideoId) return;
+    
+    const buffered = player.buffered();
+    const currentTime = player.currentTime();
+    const duration = player.duration();
+    
+    if (!buffered || buffered.length === 0 || !duration) return;
+    
+    let bufferEnd = 0;
+    for (let i = 0; i < buffered.length; i++) {
+        if (buffered.start(i) <= currentTime && buffered.end(i) > currentTime) {
+            bufferEnd = buffered.end(i);
+            break;
+        }
+    }
+    
+    const bufferAhead = bufferEnd - currentTime;
+    const remainingTime = duration - currentTime;
+    
+    if (bufferAhead < 2 && remainingTime > 5) {
+        lowBufferCount++;
+        console.log(`Low buffer detected: ${bufferAhead.toFixed(1)}s ahead (count: ${lowBufferCount})`);
+        
+        if (lowBufferCount >= 3) {
+            console.log('Buffer critically low, attempting reload');
+            lowBufferCount = 0;
+            reloadCurrentVideo();
+        }
+    } else if (bufferAhead > 5) {
+        lowBufferCount = Math.max(0, lowBufferCount - 1);
+    }
+}
+
 function attemptStallRecovery() {
     if (!player || player.paused()) return;
     
@@ -197,6 +290,7 @@ function reloadCurrentVideo() {
     
     console.log('Reloading current video:', currentVideoId);
     const savedTime = player.currentTime();
+    stopBufferMonitoring();
     
     player.reset();
     let proxyUrl = `/api/proxy/${currentVideoId}`;
@@ -325,13 +419,7 @@ async function preloadNextVideo(video) {
             proxyUrl += `?quality=${currentQuality}`;
         }
         
-        const streamData = await fetch(`/api/stream/${video.id}${currentQuality ? '?quality=' + currentQuality : ''}`).then(r => r.json());
-        
-        if (streamData && streamData.is_hls) {
-            cache.set(video.id, { src: proxyUrl, type: 'application/vnd.apple.mpegurl' });
-        } else {
-            cache.set(video.id, { src: proxyUrl, type: 'video/mp4' });
-        }
+        cache.set(video.id, { src: proxyUrl, type: 'video/mp4' });
     } catch (error) {
         preloadingVideoId = null;
     }
@@ -342,6 +430,29 @@ let queueItems = [];
 function preloadNextInQueue() {
     if (queueItems.length > 0) {
         preloadNextVideo(queueItems[0]);
+    }
+}
+
+async function downloadNextVideo() {
+    if (!queueItems || queueItems.length === 0) return;
+    
+    const nextVideo = queueItems[0];
+    if (!nextVideo || nextVideo.id === currentVideoId) return;
+    
+    console.log('Starting background download of next video:', nextVideo.id, nextVideo.title);
+    
+    try {
+        let proxyUrl = `/api/proxy/${nextVideo.id}`;
+        if (currentQuality) {
+            proxyUrl += `?quality=${currentQuality}`;
+        }
+        
+        const response = await fetch(proxyUrl, { method: 'HEAD' });
+        if (response.ok) {
+            console.log('Next video download initiated:', nextVideo.id);
+        }
+    } catch (error) {
+        console.error('Failed to initiate download:', error);
     }
 }
 
@@ -389,11 +500,7 @@ async function loadAndPlay(video) {
             
             const streamData = await fetch(`/api/stream/${video.id}${currentQuality ? '?quality=' + currentQuality : ''}`).then(r => r.json());
             
-            if (streamData && streamData.is_hls) {
-                player.src({ src: proxyUrl, type: 'application/vnd.apple.mpegurl' });
-            } else {
-                player.src({ src: proxyUrl, type: 'video/mp4' });
-            }
+            player.src({ src: proxyUrl, type: 'video/mp4' });
         }
         currentVideoId = video.id;
         

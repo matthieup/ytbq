@@ -3,6 +3,7 @@ from app.models.schemas import QueueItem, QueueState
 from datetime import datetime
 import asyncio
 from app.database import get_db, init_db, migrate_from_json
+import random
 
 
 class QueueService:
@@ -265,6 +266,12 @@ class QueueService:
             if ws in self._connections:
                 self._connections.remove(ws)
 
+        if state.get("current") and not state.get("items"):
+            from app.config import AUTO_QUEUE_ENABLED
+
+            if AUTO_QUEUE_ENABLED:
+                asyncio.create_task(self._auto_queue_if_needed(state["current"]))
+
     def get_queue_length(self) -> int:
         with get_db() as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM queue_items")
@@ -344,6 +351,50 @@ class QueueService:
                 self._set_current_video(conn, item)
                 conn.commit()
         self._increment_play_count(item)
+
+    async def _auto_queue_if_needed(self, current_video: dict):
+        from app.services.youtube import youtube_service
+        from app.models.schemas import QueueItem
+
+        await asyncio.sleep(1)
+
+        async with self._lock:
+            with get_db() as conn:
+                cursor = conn.execute("SELECT COUNT(*) FROM queue_items")
+                count = cursor.fetchone()[0]
+                if count > 0:
+                    return
+
+        channel = current_video.get("channel")
+        if not channel:
+            return
+
+        search_query = channel
+        results = youtube_service.search_videos(search_query, limit=10)
+
+        if not results:
+            return
+
+        current_id = current_video.get("id")
+        valid_results = [r for r in results if r.id != current_id]
+        if not valid_results:
+            valid_results = results
+
+        chosen = random.choice(valid_results)
+
+        item = QueueItem(
+            id=chosen.id,
+            title=chosen.title,
+            thumbnail=chosen.thumbnail,
+            duration=chosen.duration,
+            channel=chosen.channel,
+            added_at=datetime.now(),
+            added_by="Auto-Queue",
+            user_id="auto_queue",
+            play_count=0,
+        )
+
+        await self.add_to_queue(item)
 
 
 queue_service = QueueService()

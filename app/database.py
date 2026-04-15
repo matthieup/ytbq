@@ -58,6 +58,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS play_counts (
                 video_id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
+                channel TEXT,
                 count INTEGER DEFAULT 0,
                 last_played TEXT
             );
@@ -65,6 +66,13 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_queue_position ON queue_items(position);
             CREATE INDEX IF NOT EXISTS idx_queue_video_id ON queue_items(video_id);
         """)
+
+        cursor = conn.execute("PRAGMA table_info(play_counts)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "channel" not in columns:
+            print("Adding channel column to play_counts table")
+            conn.execute("ALTER TABLE play_counts ADD COLUMN channel TEXT")
+
         conn.commit()
 
 

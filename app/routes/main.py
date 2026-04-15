@@ -18,6 +18,7 @@ from pydantic import BaseModel
 import qrcode
 import io
 import httpx
+import os
 from urllib.parse import urlencode
 from datetime import datetime
 
@@ -114,23 +115,61 @@ async def get_stream_url(video_id: str, quality: int = None):
 
 @router.get("/api/proxy/{video_id}")
 async def proxy_stream(request: Request, video_id: str, quality: int = None):
-    format_data = youtube_service.get_format_with_headers(video_id, quality)
-    if not format_data:
-        print(f"No format data for video: {video_id}")
+    from app.services.youtube import youtube_service
+
+    cache_file = await youtube_service.download_video(video_id, quality)
+
+    if not cache_file:
+        print(f"Failed to download {video_id}")
         return Response(content=b"Could not get stream", status_code=404)
 
-    url = format_data["url"]
-    headers = format_data.get("headers", {})
-    headers.pop("Sec-Fetch-Mode", None)
-
+    file_size = os.path.getsize(cache_file)
     range_header = request.headers.get("range")
-    if range_header:
-        headers["Range"] = range_header
 
-    is_hls = format_data.get("is_hls", False)
-    print(
-        f"Proxy stream for {video_id}: is_hls={is_hls}, height={format_data.get('height')}"
+    if range_header:
+        range_match = range_header.replace("bytes=", "").split("-")
+        start = int(range_match[0])
+        end = int(range_match[1]) if range_match[1] else file_size - 1
+        end = min(end, file_size - 1)
+
+        with open(cache_file, "rb") as f:
+            f.seek(start)
+            chunk = f.read(end - start + 1)
+
+        return Response(
+            content=chunk,
+            status_code=206,
+            media_type="video/mp4",
+            headers={
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(len(chunk)),
+            },
+        )
+
+    def iterfile():
+        with open(cache_file, "rb") as f:
+            yield from iter(lambda: f.read(65536), b"")
+
+    return StreamingResponse(
+        iterfile(),
+        media_type="video/mp4",
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(file_size),
+        },
     )
+
+
+@router.delete("/api/cache/{video_id}")
+async def remove_cached(video_id: str):
+    from app.services.youtube import youtube_service
+
+    success = youtube_service.remove_cached_video(video_id)
+
+    youtube_service.cleanup_old_cache()
+
+    return {"success": success}
 
     if not is_hls:
 

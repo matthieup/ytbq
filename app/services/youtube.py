@@ -1,9 +1,15 @@
 import yt_dlp
 import os
+import asyncio
+import time
 from typing import List, Optional, Dict
 from pathlib import Path
 from app.models.schemas import VideoResult, VideoInfo
 from app.config import VIDEO_QUALITY
+
+CACHE_DIR = Path(__file__).parent.parent.parent / "video_cache"
+CACHE_DIR.mkdir(exist_ok=True)
+CACHE_EXPIRY_SECONDS = 15 * 60  # 15 minutes
 
 _deno_path = Path(__file__).parent.parent.parent / ".deno" / "bin" / "deno"
 if _deno_path.exists():
@@ -18,6 +24,69 @@ class YouTubeService:
             "extract_flat": False,
             "remote_components": ["ejs:github"],
         }
+
+    async def download_video(self, video_id: str, quality: int = None) -> Optional[str]:
+        target_quality = quality if quality else VIDEO_QUALITY
+        cache_file = CACHE_DIR / f"{video_id}_{target_quality}.mp4"
+
+        if cache_file.exists():
+            print(f"Cache hit for {video_id} at {target_quality}p")
+            return str(cache_file)
+
+        print(f"Downloading {video_id} at {target_quality}p...")
+
+        def _download():
+            opts = {
+                "format": f"bestvideo[height<={target_quality}]+bestaudio/best[height<={target_quality}]",
+                "merge_output_format": "mp4",
+                "outtmpl": str(cache_file),
+                "quiet": True,
+                "no_warnings": True,
+            }
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
+                if cache_file.exists():
+                    print(f"Downloaded {video_id} to {cache_file}")
+                    return str(cache_file)
+            except Exception as e:
+                print(f"Download error for {video_id}: {e}")
+                if cache_file.exists():
+                    cache_file.unlink()
+            return None
+
+        return await asyncio.to_thread(_download)
+
+    def remove_cached_video(self, video_id: str, quality: int = None) -> bool:
+        target_quality = quality if quality else VIDEO_QUALITY
+        cache_file = CACHE_DIR / f"{video_id}_{target_quality}.mp4"
+        if cache_file.exists():
+            cache_file.unlink()
+            print(f"Removed cached video: {cache_file}")
+            return True
+        return False
+
+    def cleanup_old_cache(self) -> int:
+        now = time.time()
+        removed_count = 0
+
+        for cache_file in CACHE_DIR.glob("*.mp4"):
+            file_age = now - cache_file.stat().st_mtime
+
+            if file_age > CACHE_EXPIRY_SECONDS:
+                try:
+                    cache_file.unlink()
+                    print(
+                        f"Removed expired cache: {cache_file.name} ({file_age / 60:.1f}m old)"
+                    )
+                    removed_count += 1
+                except Exception as e:
+                    print(f"Error removing {cache_file}: {e}")
+
+        if removed_count > 0:
+            print(f"Cache cleanup complete: removed {removed_count} files")
+
+        return removed_count
 
     def search_videos(self, query: str, limit: int = 10) -> List[VideoResult]:
         print(f"Searching for: {query} (limit: {limit})")
@@ -175,13 +244,13 @@ class YouTubeService:
                     protocol = f.get("protocol", "")
 
                     if vcodec != "none" and acodec != "none":
-                        if height <= target_quality:
-                            is_hls = protocol in ["m3u8", "m3u8_native"]
+                        is_hls = protocol in ["m3u8", "m3u8_native"]
+                        if not is_hls and height <= target_quality:
                             candidates.append(
                                 {
                                     "format": f,
                                     "height": height,
-                                    "is_hls": is_hls,
+                                    "is_hls": False,
                                 }
                             )
 
