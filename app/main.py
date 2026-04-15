@@ -1,9 +1,10 @@
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.routes.main import router
+import os
 
 
 class MobileRestrictMiddleware(BaseHTTPMiddleware):
@@ -58,6 +59,12 @@ app.add_middleware(
 app.add_middleware(MobileRestrictMiddleware)
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse("static/favicon.ico")
+
 
 app.include_router(router)
 

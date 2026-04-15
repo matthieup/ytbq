@@ -36,24 +36,47 @@ class YouTubeService:
         print(f"Downloading {video_id} at {target_quality}p...")
 
         def _download():
+            temp_file = CACHE_DIR / f"{video_id}_{target_quality}.temp.mp4"
+
             opts = {
                 "format": f"bestvideo[height<={target_quality}]+bestaudio/best[height<={target_quality}]",
                 "merge_output_format": "mp4",
-                "outtmpl": str(cache_file),
-                "quiet": True,
-                "no_warnings": True,
+                "outtmpl": str(temp_file),
+                "quiet": False,
+                "no_warnings": False,
+                "overwrites": True,
             }
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
-                if cache_file.exists():
+                    result = ydl.extract_info(
+                        f"https://www.youtube.com/watch?v={video_id}", download=True
+                    )
+
+                # Find the actual downloaded file (yt-dlp may add suffixes)
+                downloaded_files = list(
+                    CACHE_DIR.glob(f"{video_id}_{target_quality}.temp*.mp4")
+                )
+
+                if downloaded_files:
+                    # Use the largest file (should be the merged one)
+                    downloaded_file = max(
+                        downloaded_files, key=lambda x: x.stat().st_size
+                    )
+                    downloaded_file.rename(cache_file)
                     print(f"Downloaded {video_id} to {cache_file}")
                     return str(cache_file)
+
             except Exception as e:
                 print(f"Download error for {video_id}: {e}")
-                if cache_file.exists():
-                    cache_file.unlink()
+                # Clean up any partial files
+                for f in CACHE_DIR.glob(f"{video_id}_{target_quality}.temp*"):
+                    try:
+                        f.unlink()
+                    except:
+                        pass
             return None
+
+        return await asyncio.to_thread(_download)
 
         return await asyncio.to_thread(_download)
 
