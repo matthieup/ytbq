@@ -15,6 +15,11 @@ wheels/
 # Database
 ytbq.db
 
+# Video cache
+video_cache/
+
 # Legacy JSON files (migrated to SQLite)
 queue_state.json
 play_counts.json
+
+uv.lock

@@ -45,6 +45,10 @@ function init() {
             fetch(`/api/cache/${currentVideoId}`, { method: 'DELETE' })
                 .then(() => console.log('Cached video removed:', currentVideoId))
                 .catch(err => console.error('Failed to remove cache:', err));
+            
+            fetch('/api/cache/cleanup', { method: 'POST' })
+                .then(() => console.log('Cache cleanup triggered'))
+                .catch(err => console.error('Cleanup failed:', err));
         }
         playNext();
     });
@@ -439,18 +443,23 @@ async function downloadNextVideo() {
     const nextVideo = queueItems[0];
     if (!nextVideo || nextVideo.id === currentVideoId) return;
     
-    console.log('Starting background download of next video:', nextVideo.id, nextVideo.title);
+    console.log('Triggering background download of next video:', nextVideo.id);
     
     try {
-        let proxyUrl = `/api/proxy/${nextVideo.id}`;
+        let prepareUrl = `/api/cache/${nextVideo.id}/prepare`;
         if (currentQuality) {
-            proxyUrl += `?quality=${currentQuality}`;
+            prepareUrl += `?quality=${currentQuality}`;
         }
         
-        const response = await fetch(proxyUrl, { method: 'HEAD' });
-        if (response.ok) {
-            console.log('Next video download initiated:', nextVideo.id);
-        }
+        fetch(prepareUrl, { method: 'POST' }).then(response => {
+            if (response.ok) {
+                console.log('Next video download triggered successfully');
+            } else {
+                console.error('Failed to trigger download');
+            }
+        }).catch(err => {
+            console.error('Download trigger failed:', err);
+        });
     } catch (error) {
         console.error('Failed to initiate download:', error);
     }

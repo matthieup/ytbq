@@ -171,6 +171,27 @@ async def remove_cached(video_id: str):
 
     return {"success": success}
 
+
+@router.post("/api/cache/cleanup")
+async def trigger_cleanup():
+    from app.services.youtube import youtube_service
+
+    removed = youtube_service.cleanup_old_cache()
+    return {"removed": removed}
+
+
+@router.post("/api/cache/{video_id}/prepare")
+async def prepare_cache(video_id: str, quality: int = None):
+    from app.services.youtube import youtube_service
+
+    cache_file = await youtube_service.download_video(video_id, quality)
+
+    if cache_file:
+        youtube_service.cleanup_old_cache()
+        return {"status": "cached", "file": cache_file}
+    else:
+        return {"status": "failed"}
+
     if not is_hls:
 
         async def stream_generator():
