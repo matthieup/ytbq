@@ -1,65 +1,32 @@
 from typing import List, Optional
-from app.models.schemas import QueueItem, QueueState, PlayCount
+from app.models.schemas import QueueItem, QueueState
 from datetime import datetime
 import asyncio
-import json
-import os
-import time
+from app.database import get_db, init_db, migrate_from_json
 
 
 class QueueService:
-    QUEUE_FILE = "queue_state.json"
-    PLAY_COUNTS_FILE = "play_counts.json"
-
     def __init__(self):
-        self._queue: List[QueueItem] = []
-        self._current: Optional[QueueItem] = None
         self._connections: List = []
         self._lock = asyncio.Lock()
-        self._play_counts: dict = {}
         self._last_next_call = 0
-        self._load_state()
-        self._load_play_counts()
+        init_db()
+        migrate_from_json()
 
-    def _load_state(self):
-        if os.path.exists(self.QUEUE_FILE):
-            try:
-                with open(self.QUEUE_FILE, "r") as f:
-                    data = json.load(f)
-                    if data.get("queue"):
-                        self._queue = [QueueItem(**item) for item in data["queue"]]
-                    if data.get("current"):
-                        self._current = QueueItem(**data["current"])
-            except Exception as e:
-                pass
-
-    def _load_play_counts(self):
-        if os.path.exists(self.PLAY_COUNTS_FILE):
-            try:
-                with open(self.PLAY_COUNTS_FILE, "r") as f:
-                    self._play_counts = json.load(f)
-            except Exception as e:
-                self._play_counts = {}
-
-    def _save_play_counts(self):
-        try:
-            with open(self.PLAY_COUNTS_FILE, "w") as f:
-                json.dump(self._play_counts, f, default=str)
-        except Exception as e:
-            pass
-
-    def _save_state(self):
-        try:
-            data = {
-                "queue": [item.model_dump(mode="json") for item in self._queue],
-                "current": self._current.model_dump(mode="json")
-                if self._current
-                else None,
-            }
-            with open(self.QUEUE_FILE, "w") as f:
-                json.dump(data, f)
-        except Exception as e:
-            pass
+    def _row_to_queue_item(self, row) -> QueueItem:
+        return QueueItem(
+            id=row["video_id"],
+            title=row["title"],
+            thumbnail=row["thumbnail"],
+            duration=row["duration"],
+            channel=row["channel"],
+            added_at=datetime.fromisoformat(row["added_at"])
+            if row["added_at"]
+            else datetime.now(),
+            added_by=row["added_by"],
+            user_id=row["user_id"],
+            play_count=row["play_count"],
+        )
 
     async def connect(self, websocket):
         async with self._lock:
@@ -73,89 +40,245 @@ class QueueService:
 
     async def add_to_queue(self, video: QueueItem) -> int:
         async with self._lock:
-            self._queue.append(video)
-            position = len(self._queue)
-        self._save_state()
+            with get_db() as conn:
+                cursor = conn.execute(
+                    "SELECT COALESCE(MAX(position), -1) + 1 FROM queue_items"
+                )
+                position = cursor.fetchone()[0]
+
+                conn.execute(
+                    """
+                    INSERT INTO queue_items 
+                    (video_id, title, thumbnail, duration, channel, added_at, added_by, user_id, play_count, position)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        video.id,
+                        video.title,
+                        video.thumbnail,
+                        video.duration,
+                        video.channel,
+                        video.added_at.isoformat(),
+                        video.added_by,
+                        video.user_id,
+                        video.play_count or 0,
+                        position,
+                    ),
+                )
+                conn.commit()
+
+                cursor = conn.execute("SELECT COUNT(*) FROM queue_items")
+                queue_length = cursor.fetchone()[0]
+
         await self.broadcast_update()
-        return position
+        return queue_length
 
     async def remove_from_queue(self, index: int) -> bool:
         async with self._lock:
-            if 0 <= index < len(self._queue):
-                self._queue.pop(index)
-                result = True
-            else:
-                result = False
-        if result:
-            self._save_state()
-            await self.broadcast_update()
-        return result
+            with get_db() as conn:
+                cursor = conn.execute(
+                    "SELECT id FROM queue_items ORDER BY position LIMIT 1 OFFSET ?",
+                    (index,),
+                )
+                row = cursor.fetchone()
+                if not row:
+                    return False
+
+                item_id = row["id"]
+                conn.execute("DELETE FROM queue_items WHERE id = ?", (item_id,))
+
+                cursor = conn.execute("SELECT id FROM queue_items ORDER BY position")
+                rows = cursor.fetchall()
+                for i, row in enumerate(rows):
+                    conn.execute(
+                        "UPDATE queue_items SET position = ? WHERE id = ?",
+                        (i, row["id"]),
+                    )
+
+                conn.commit()
+
+        await self.broadcast_update()
+        return True
 
     async def get_next_video(self) -> Optional[QueueItem]:
+        import time
+
         now = time.time()
         if now - self._last_next_call < 2:
             return None
         self._last_next_call = now
 
         async with self._lock:
-            if self._queue:
-                self._current = self._queue.pop(0)
-                result = self._current
-            else:
-                self._current = None
-                result = None
-        if result:
-            self._increment_play_count(result)
-        self._save_state()
+            with get_db() as conn:
+                cursor = conn.execute(
+                    "SELECT * FROM queue_items ORDER BY position LIMIT 1"
+                )
+                row = cursor.fetchone()
+
+                if not row:
+                    conn.execute("DELETE FROM current_video WHERE id = 1")
+                    conn.commit()
+                    return None
+
+                item = self._row_to_queue_item(row)
+
+                conn.execute("DELETE FROM queue_items WHERE id = ?", (row["id"],))
+
+                cursor = conn.execute("SELECT id FROM queue_items ORDER BY position")
+                rows = cursor.fetchall()
+                for i, r in enumerate(rows):
+                    conn.execute(
+                        "UPDATE queue_items SET position = ? WHERE id = ?", (i, r["id"])
+                    )
+
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO current_video 
+                    (id, video_id, title, thumbnail, duration, channel, added_at, added_by, user_id, play_count)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        item.id,
+                        item.title,
+                        item.thumbnail,
+                        item.duration,
+                        item.channel,
+                        item.added_at.isoformat(),
+                        item.added_by,
+                        item.user_id,
+                        item.play_count or 0,
+                    ),
+                )
+
+                conn.commit()
+
+        if item:
+            self._increment_play_count(item)
+
         await self.broadcast_update()
-        return result
+        return item
 
     async def clear_current(self):
         async with self._lock:
-            self._current = None
-        self._save_state()
+            with get_db() as conn:
+                conn.execute("DELETE FROM current_video WHERE id = 1")
+                conn.commit()
+
         await self.broadcast_update()
 
     async def play_at_index(self, index: int) -> Optional[QueueItem]:
         async with self._lock:
-            if 0 <= index < len(self._queue):
-                self._current = self._queue.pop(index)
-                result = self._current
-            else:
-                result = None
-        if result:
-            self._increment_play_count(result)
-            self._save_state()
+            with get_db() as conn:
+                cursor = conn.execute(
+                    "SELECT * FROM queue_items ORDER BY position LIMIT 1 OFFSET ?",
+                    (index,),
+                )
+                row = cursor.fetchone()
+
+                if not row:
+                    return None
+
+                item = self._row_to_queue_item(row)
+
+                conn.execute("DELETE FROM queue_items WHERE id = ?", (row["id"],))
+
+                cursor = conn.execute("SELECT id FROM queue_items ORDER BY position")
+                rows = cursor.fetchall()
+                for i, r in enumerate(rows):
+                    conn.execute(
+                        "UPDATE queue_items SET position = ? WHERE id = ?", (i, r["id"])
+                    )
+
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO current_video 
+                    (id, video_id, title, thumbnail, duration, channel, added_at, added_by, user_id, play_count)
+                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                    (
+                        item.id,
+                        item.title,
+                        item.thumbnail,
+                        item.duration,
+                        item.channel,
+                        item.added_at.isoformat(),
+                        item.added_by,
+                        item.user_id,
+                        item.play_count or 0,
+                    ),
+                )
+
+                conn.commit()
+
+        if item:
+            self._increment_play_count(item)
             await self.broadcast_update()
-        return result
+
+        return item
 
     def _increment_play_count(self, video: QueueItem):
-        video_id = video.id
-        if video_id not in self._play_counts:
-            self._play_counts[video_id] = {
-                "video_id": video_id,
-                "title": video.title,
-                "count": 0,
-                "last_played": None,
-            }
-        self._play_counts[video_id]["count"] += 1
-        self._play_counts[video_id]["last_played"] = datetime.now().isoformat()
-        video.play_count = self._play_counts[video_id]["count"]
-        self._save_play_counts()
+        with get_db() as conn:
+            now = datetime.now().isoformat()
+
+            cursor = conn.execute(
+                "SELECT count FROM play_counts WHERE video_id = ?", (video.id,)
+            )
+            row = cursor.fetchone()
+
+            if row:
+                new_count = row["count"] + 1
+                conn.execute(
+                    """
+                    UPDATE play_counts SET count = ?, last_played = ?, title = ?
+                    WHERE video_id = ?
+                """,
+                    (new_count, now, video.title, video.id),
+                )
+            else:
+                new_count = 1
+                conn.execute(
+                    """
+                    INSERT INTO play_counts (video_id, title, count, last_played)
+                    VALUES (?, ?, ?, ?)
+                """,
+                    (video.id, video.title, 1, now),
+                )
+
+            conn.execute(
+                "UPDATE current_video SET play_count = ? WHERE id = 1", (new_count,)
+            )
+            conn.commit()
+
+            video.play_count = new_count
 
     async def get_queue(self) -> QueueState:
         async with self._lock:
-            return QueueState(current=self._current, items=list(self._queue))
+            return await self._get_state_internal()
 
     async def clear_queue(self):
         async with self._lock:
-            self._queue = []
+            with get_db() as conn:
+                conn.execute("DELETE FROM queue_items")
+                conn.commit()
+
         await self.broadcast_update()
 
     async def get_state(self) -> dict:
         async with self._lock:
-            state = QueueState(current=self._current, items=list(self._queue))
+            state = await self._get_state_internal()
         return state.model_dump(mode="json")
+
+    async def _get_state_internal(self) -> QueueState:
+        with get_db() as conn:
+            cursor = conn.execute("SELECT * FROM current_video WHERE id = 1")
+            current_row = cursor.fetchone()
+            current = self._row_to_queue_item(current_row) if current_row else None
+
+            cursor = conn.execute("SELECT * FROM queue_items ORDER BY position")
+            rows = cursor.fetchall()
+            items = [self._row_to_queue_item(row) for row in rows]
+
+            return QueueState(current=current, items=items)
 
     async def send_state(self, websocket):
         try:
@@ -179,27 +302,63 @@ class QueueService:
                 self._connections.remove(ws)
 
     def get_queue_length(self) -> int:
-        return len(self._queue)
+        with get_db() as conn:
+            cursor = conn.execute("SELECT COUNT(*) FROM queue_items")
+            return cursor.fetchone()[0]
 
     async def user_has_video_in_queue(self, user_id: str) -> bool:
-        async with self._lock:
-            for item in self._queue:
-                if item.user_id == user_id:
-                    return True
-            return False
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT 1 FROM queue_items WHERE user_id = ? LIMIT 1", (user_id,)
+            )
+            return cursor.fetchone() is not None
 
     async def reorder_queue(self, from_index: int, to_index: int) -> bool:
         async with self._lock:
-            if 0 <= from_index < len(self._queue) and 0 <= to_index < len(self._queue):
-                item = self._queue.pop(from_index)
-                self._queue.insert(to_index, item)
-                result = True
-            else:
-                result = False
-        if result:
-            self._save_state()
-            await self.broadcast_update()
-        return result
+            with get_db() as conn:
+                cursor = conn.execute("SELECT COUNT(*) FROM queue_items")
+                count = cursor.fetchone()[0]
+
+                if (
+                    from_index < 0
+                    or from_index >= count
+                    or to_index < 0
+                    or to_index >= count
+                ):
+                    return False
+
+                cursor = conn.execute("SELECT id FROM queue_items ORDER BY position")
+                rows = cursor.fetchall()
+                item_ids = [row["id"] for row in rows]
+
+                item_id = item_ids.pop(from_index)
+                item_ids.insert(to_index, item_id)
+
+                for i, iid in enumerate(item_ids):
+                    conn.execute(
+                        "UPDATE queue_items SET position = ? WHERE id = ?", (i, iid)
+                    )
+
+                conn.commit()
+
+        await self.broadcast_update()
+        return True
+
+    @property
+    def _play_counts(self) -> dict:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT video_id, title, count, last_played FROM play_counts"
+            )
+            result = {}
+            for row in cursor.fetchall():
+                result[row["video_id"]] = {
+                    "video_id": row["video_id"],
+                    "title": row["title"],
+                    "count": row["count"],
+                    "last_played": row["last_played"],
+                }
+            return result
 
 
 queue_service = QueueService()
