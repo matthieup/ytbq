@@ -12,6 +12,8 @@ let stallCount = 0;
 let maxStallRetries = 3;
 let isPlaying = false;
 
+let isFullscreen = false;
+
 function init() {
     fetch('/api/current/clear', { method: 'POST' });
     
@@ -366,6 +368,7 @@ async function playNext() {
 
 async function loadAndPlay(video) {
     try {
+        const wasFullscreen = isFullscreen;
         player.reset();
         stallCount = 0;
         clearStallRecovery();
@@ -393,6 +396,13 @@ async function loadAndPlay(video) {
         const playPromise = player.play();
         if (playPromise !== undefined) {
             await playPromise;
+        }
+        
+        if (wasFullscreen) {
+            const videoWrapper = document.querySelector('.video-wrapper');
+            if (videoWrapper && videoWrapper.requestFullscreen) {
+                videoWrapper.requestFullscreen();
+            }
         }
     } catch (error) {
         console.error('Playback error:', error);
@@ -454,6 +464,14 @@ function setupControls() {
         });
     }
     
+    document.addEventListener('fullscreenchange', () => {
+        isFullscreen = !!document.fullscreenElement;
+    });
+    
+    document.addEventListener('webkitfullscreenchange', () => {
+        isFullscreen = !!document.webkitFullscreenElement;
+    });
+
     if (videoWrapper) {
         videoWrapper.addEventListener('dblclick', () => {
             if (document.fullscreenElement) {

@@ -1,11 +1,13 @@
 import sqlite3
 import json
+import os
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, List
 from contextlib import contextmanager
 
-DATABASE_PATH = Path(__file__).parent.parent / "ytbq.db"
+DATABASE_PATH = Path(
+    os.environ.get("YTBQ_DB_PATH", Path(__file__).parent.parent / "ytbq.db")
+)
 
 
 def get_connection() -> sqlite3.Connection:
@@ -75,78 +77,96 @@ def migrate_from_json():
         if cursor.fetchone()[0] > 0:
             return
 
-        if queue_file.exists():
-            try:
-                with open(queue_file) as f:
-                    data = json.load(f)
+        _migrate_queue_file(conn, queue_file)
+        _migrate_play_counts_file(conn, play_counts_file)
 
-                if data.get("current"):
-                    current = data["current"]
-                    conn.execute(
-                        """
-                        INSERT OR REPLACE INTO current_video 
-                        (id, video_id, title, thumbnail, duration, channel, added_at, added_by, user_id, play_count)
-                        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+
+def _migrate_queue_file(conn, queue_file: Path):
+    if not queue_file.exists():
+        return
+
+    try:
+        with open(queue_file) as f:
+            data = json.load(f)
+
+        if data.get("current"):
+            _insert_current_video(conn, data["current"])
+
+        if data.get("queue"):
+            for i, item in enumerate(data["queue"]):
+                _insert_queue_item(conn, item, i)
+
+        conn.commit()
+    except Exception as e:
+        print(f"Migration error: {e}")
+
+
+def _migrate_play_counts_file(conn, play_counts_file: Path):
+    if not play_counts_file.exists():
+        return
+
+    try:
+        with open(play_counts_file) as f:
+            play_counts = json.load(f)
+
+        for video_id, data in play_counts.items():
+            if isinstance(data, dict):
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO play_counts (video_id, title, count, last_played)
+                    VALUES (?, ?, ?, ?)
                     """,
-                        (
-                            current["id"],
-                            current["title"],
-                            current["thumbnail"],
-                            current.get("duration"),
-                            current.get("channel"),
-                            current.get("added_at", datetime.now().isoformat()),
-                            current.get("added_by"),
-                            current.get("user_id"),
-                            current.get("play_count", 0),
-                        ),
-                    )
+                    (
+                        video_id,
+                        data.get("title", ""),
+                        data.get("count", 0),
+                        data.get("last_played"),
+                    ),
+                )
 
-                if data.get("queue"):
-                    for i, item in enumerate(data["queue"]):
-                        conn.execute(
-                            """
-                            INSERT INTO queue_items 
-                            (video_id, title, thumbnail, duration, channel, added_at, added_by, user_id, play_count, position)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                            (
-                                item["id"],
-                                item["title"],
-                                item["thumbnail"],
-                                item.get("duration"),
-                                item.get("channel"),
-                                item.get("added_at", datetime.now().isoformat()),
-                                item.get("added_by"),
-                                item.get("user_id"),
-                                item.get("play_count", 0),
-                                i,
-                            ),
-                        )
+        conn.commit()
+    except Exception as e:
+        print(f"Play counts migration error: {e}")
 
-                conn.commit()
-            except Exception as e:
-                print(f"Migration error: {e}")
 
-        if play_counts_file.exists():
-            try:
-                with open(play_counts_file) as f:
-                    play_counts = json.load(f)
+def _insert_current_video(conn, current: dict):
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO current_video 
+        (id, video_id, title, thumbnail, duration, channel, added_at, added_by, user_id, play_count)
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            current["id"],
+            current["title"],
+            current["thumbnail"],
+            current.get("duration"),
+            current.get("channel"),
+            current.get("added_at", datetime.now().isoformat()),
+            current.get("added_by"),
+            current.get("user_id"),
+            current.get("play_count", 0),
+        ),
+    )
 
-                for video_id, data in play_counts.items():
-                    if isinstance(data, dict):
-                        conn.execute(
-                            """
-                            INSERT OR REPLACE INTO play_counts (video_id, title, count, last_played)
-                            VALUES (?, ?, ?, ?)
-                        """,
-                            (
-                                video_id,
-                                data.get("title", ""),
-                                data.get("count", 0),
-                                data.get("last_played"),
-                            ),
-                        )
 
-                conn.commit()
-            except Exception as e:
-                print(f"Play counts migration error: {e}")
+def _insert_queue_item(conn, item: dict, position: int):
+    conn.execute(
+        """
+        INSERT INTO queue_items 
+        (video_id, title, thumbnail, duration, channel, added_at, added_by, user_id, play_count, position)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            item["id"],
+            item["title"],
+            item["thumbnail"],
+            item.get("duration"),
+            item.get("channel"),
+            item.get("added_at", datetime.now().isoformat()),
+            item.get("added_by"),
+            item.get("user_id"),
+            item.get("play_count", 0),
+            position,
+        ),
+    )

@@ -11,3 +11,10 @@ wheels/
 
 # Local deno installation
 .deno/
+
+# Database
+ytbq.db
+
+# Legacy JSON files (migrated to SQLite)
+queue_state.json
+play_counts.json

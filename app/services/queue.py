@@ -28,6 +28,38 @@ class QueueService:
             play_count=row["play_count"],
         )
 
+    def _delete_queue_item_by_id(self, conn, item_id: int):
+        conn.execute("DELETE FROM queue_items WHERE id = ?", (item_id,))
+        self._renumber_positions(conn)
+
+    def _renumber_positions(self, conn):
+        cursor = conn.execute("SELECT id FROM queue_items ORDER BY position")
+        rows = cursor.fetchall()
+        for i, row in enumerate(rows):
+            conn.execute(
+                "UPDATE queue_items SET position = ? WHERE id = ?", (i, row["id"])
+            )
+
+    def _set_current_video(self, conn, item: QueueItem):
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO current_video 
+            (id, video_id, title, thumbnail, duration, channel, added_at, added_by, user_id, play_count)
+            VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                item.id,
+                item.title,
+                item.thumbnail,
+                item.duration,
+                item.channel,
+                item.added_at.isoformat(),
+                item.added_by,
+                item.user_id,
+                item.play_count or 0,
+            ),
+        )
+
     async def connect(self, websocket):
         async with self._lock:
             self._connections.append(websocket)
@@ -84,17 +116,7 @@ class QueueService:
                 if not row:
                     return False
 
-                item_id = row["id"]
-                conn.execute("DELETE FROM queue_items WHERE id = ?", (item_id,))
-
-                cursor = conn.execute("SELECT id FROM queue_items ORDER BY position")
-                rows = cursor.fetchall()
-                for i, row in enumerate(rows):
-                    conn.execute(
-                        "UPDATE queue_items SET position = ? WHERE id = ?",
-                        (i, row["id"]),
-                    )
-
+                self._delete_queue_item_by_id(conn, row["id"])
                 conn.commit()
 
         await self.broadcast_update()
@@ -121,40 +143,11 @@ class QueueService:
                     return None
 
                 item = self._row_to_queue_item(row)
-
-                conn.execute("DELETE FROM queue_items WHERE id = ?", (row["id"],))
-
-                cursor = conn.execute("SELECT id FROM queue_items ORDER BY position")
-                rows = cursor.fetchall()
-                for i, r in enumerate(rows):
-                    conn.execute(
-                        "UPDATE queue_items SET position = ? WHERE id = ?", (i, r["id"])
-                    )
-
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO current_video 
-                    (id, video_id, title, thumbnail, duration, channel, added_at, added_by, user_id, play_count)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        item.id,
-                        item.title,
-                        item.thumbnail,
-                        item.duration,
-                        item.channel,
-                        item.added_at.isoformat(),
-                        item.added_by,
-                        item.user_id,
-                        item.play_count or 0,
-                    ),
-                )
-
+                self._delete_queue_item_by_id(conn, row["id"])
+                self._set_current_video(conn, item)
                 conn.commit()
 
-        if item:
-            self._increment_play_count(item)
-
+        self._increment_play_count(item)
         await self.broadcast_update()
         return item
 
@@ -179,41 +172,12 @@ class QueueService:
                     return None
 
                 item = self._row_to_queue_item(row)
-
-                conn.execute("DELETE FROM queue_items WHERE id = ?", (row["id"],))
-
-                cursor = conn.execute("SELECT id FROM queue_items ORDER BY position")
-                rows = cursor.fetchall()
-                for i, r in enumerate(rows):
-                    conn.execute(
-                        "UPDATE queue_items SET position = ? WHERE id = ?", (i, r["id"])
-                    )
-
-                conn.execute(
-                    """
-                    INSERT OR REPLACE INTO current_video 
-                    (id, video_id, title, thumbnail, duration, channel, added_at, added_by, user_id, play_count)
-                    VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        item.id,
-                        item.title,
-                        item.thumbnail,
-                        item.duration,
-                        item.channel,
-                        item.added_at.isoformat(),
-                        item.added_by,
-                        item.user_id,
-                        item.play_count or 0,
-                    ),
-                )
-
+                self._delete_queue_item_by_id(conn, row["id"])
+                self._set_current_video(conn, item)
                 conn.commit()
 
-        if item:
-            self._increment_play_count(item)
-            await self.broadcast_update()
-
+        self._increment_play_count(item)
+        await self.broadcast_update()
         return item
 
     def _increment_play_count(self, video: QueueItem):
