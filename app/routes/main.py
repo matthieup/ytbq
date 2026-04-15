@@ -9,12 +9,17 @@ from app.config import (
     VIDEO_QUALITY,
     ALLOW_MULTIPLE_VIDEOS,
     MULTIPLE_VIDEOS_LOCKED,
+    AUTO_QUEUE_ENABLED,
+    AUTO_QUEUE_LOCKED,
+    get_config_dict,
+    update_config,
 )
 from pydantic import BaseModel
 import qrcode
 import io
 import httpx
 from urllib.parse import urlencode
+from datetime import datetime
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -33,6 +38,8 @@ async def main_display(request: Request):
             "video_quality": VIDEO_QUALITY,
             "allow_multiple_videos": ALLOW_MULTIPLE_VIDEOS,
             "multiple_videos_locked": MULTIPLE_VIDEOS_LOCKED,
+            "auto_queue_enabled": AUTO_QUEUE_ENABLED,
+            "auto_queue_locked": AUTO_QUEUE_LOCKED,
         },
     )
 
@@ -60,11 +67,20 @@ async def get_qr_code():
 
 @router.get("/api/config")
 async def get_config():
-    return {
-        "video_quality": VIDEO_QUALITY,
-        "allow_multiple_videos": ALLOW_MULTIPLE_VIDEOS,
-        "multiple_videos_locked": MULTIPLE_VIDEOS_LOCKED,
-    }
+    return get_config_dict()
+
+
+class ConfigUpdate(BaseModel):
+    key: str
+    value: bool
+
+
+@router.post("/api/config")
+async def set_config(config: ConfigUpdate):
+    allowed_keys = ["allow_multiple_videos", "auto_queue_enabled"]
+    if config.key not in allowed_keys:
+        return {"success": False, "error": "Invalid config key"}
+    return {"success": True, "config": update_config(config.key, config.value)}
 
 
 @router.websocket("/ws")
@@ -272,7 +288,53 @@ async def get_next_video():
     video = await queue_service.get_next_video()
     if video:
         return {"video": video.model_dump(mode="json")}
+
+    from app.config import AUTO_QUEUE_ENABLED
+
+    if AUTO_QUEUE_ENABLED:
+        last_video = queue_service.get_last_played_video()
+        if last_video and last_video.get("channel"):
+            auto_video = await auto_queue_from_artist(
+                last_video["channel"], last_video["video_id"]
+            )
+            if auto_video:
+                return {"video": auto_video.model_dump(mode="json")}
+
     return {"video": None}
+
+
+async def auto_queue_from_artist(channel: str, exclude_video_id: str = None):
+    import random
+    from app.services.youtube import youtube_service
+
+    search_query = f"{channel} - official"
+    results = youtube_service.search_videos(search_query, limit=10)
+
+    if not results:
+        return None
+
+    valid_results = [r for r in results if r.id != exclude_video_id]
+    if not valid_results:
+        valid_results = results
+
+    chosen = random.choice(valid_results)
+
+    item = QueueItem(
+        id=chosen.id,
+        title=chosen.title,
+        thumbnail=chosen.thumbnail,
+        duration=chosen.duration,
+        channel=chosen.channel,
+        added_at=datetime.now(),
+        added_by="Auto-Queue",
+        user_id="auto_queue",
+        play_count=0,
+    )
+
+    await queue_service.set_current_video(item)
+    await queue_service.broadcast_update()
+
+    return item
 
 
 @router.post("/api/current/clear")

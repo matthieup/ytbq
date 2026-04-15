@@ -324,5 +324,26 @@ class QueueService:
                 }
             return result
 
+    def get_last_played_video(self) -> Optional[dict]:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "SELECT video_id, title, channel FROM play_counts ORDER BY last_played DESC LIMIT 1"
+            )
+            row = cursor.fetchone()
+            if row:
+                return {
+                    "video_id": row["video_id"],
+                    "title": row["title"],
+                    "channel": row["channel"],
+                }
+            return None
+
+    async def set_current_video(self, item: QueueItem):
+        async with self._lock:
+            with get_db() as conn:
+                self._set_current_video(conn, item)
+                conn.commit()
+        self._increment_play_count(item)
+
 
 queue_service = QueueService()

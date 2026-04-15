@@ -65,6 +65,13 @@
             </div>
             <div class="toggle-control">
                 <label class="toggle-label">
+                    <input type="checkbox" id="autoQueueToggle" class="toggle-input">
+                    <span class="toggle-switch"></span>
+                    <span class="toggle-text">Auto-queue</span>
+                </label>
+            </div>
+            <div class="toggle-control">
+                <label class="toggle-label">
                     <input type="checkbox" id="themeToggle" class="toggle-input">
                     <span class="toggle-switch"></span>
                     <span class="toggle-text">Light</span>
@@ -120,5 +127,7 @@
     window.VIDEO_QUALITY = {{ video_quality }};
     window.ALLOW_MULTIPLE_VIDEOS = {{ allow_multiple_videos|lower }};
     window.MULTIPLE_VIDEOS_LOCKED = {{ multiple_videos_locked|lower }};
+    window.AUTO_QUEUE_ENABLED = {{ auto_queue_enabled|lower }};
+    window.AUTO_QUEUE_LOCKED = {{ auto_queue_locked|lower }};
 </script>
 {% endblock %}

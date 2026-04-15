@@ -2,5 +2,7 @@
     "base_url": "http://192.168.1.108:8000",
     "video_quality": 1080,
     "allow_multiple_videos": true,
-    "multiple_videos_locked": false
+    "multiple_videos_locked": false,
+    "auto_queue_enabled": false,
+    "auto_queue_locked": false
 }

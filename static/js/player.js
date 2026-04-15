@@ -3,6 +3,7 @@ let ws;
 let currentVideoId = null;
 let currentQuality = null;
 let allowMultipleVideos = true;
+let autoQueueEnabled = false;
 let cache = new Map();
 let preloadingVideoId = null;
 let lastPlayNextCall = 0;
@@ -125,6 +126,9 @@ function init() {
     }
     if (typeof window.ALLOW_MULTIPLE_VIDEOS !== 'undefined') {
         allowMultipleVideos = window.ALLOW_MULTIPLE_VIDEOS;
+    }
+    if (typeof window.AUTO_QUEUE_ENABLED !== 'undefined') {
+        autoQueueEnabled = window.AUTO_QUEUE_ENABLED;
     }
     
     connectWebSocket();
@@ -577,6 +581,29 @@ function setupControls() {
         } else {
             multipleVideosToggle.addEventListener('change', (e) => {
                 allowMultipleVideos = e.target.checked;
+                fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: 'allow_multiple_videos', value: allowMultipleVideos })
+                });
+            });
+        }
+    }
+
+    const autoQueueToggle = document.getElementById('autoQueueToggle');
+    if (autoQueueToggle) {
+        autoQueueToggle.checked = autoQueueEnabled;
+        if (window.AUTO_QUEUE_LOCKED) {
+            autoQueueToggle.disabled = true;
+            autoQueueToggle.parentElement.classList.add('disabled');
+        } else {
+            autoQueueToggle.addEventListener('change', (e) => {
+                autoQueueEnabled = e.target.checked;
+                fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: 'auto_queue_enabled', value: autoQueueEnabled })
+                });
             });
         }
     }
