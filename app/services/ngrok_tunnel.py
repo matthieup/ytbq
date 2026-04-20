@@ -8,6 +8,7 @@ except ImportError:
     ngrok = None
 
 _tunnel = None
+_AUTHTOKEN_ENV_VARS = ("NGROK_AUTHTOKEN", "NGROK_AUTH_TOKEN", "NGROK_TOKEN")
 
 
 def _is_enabled() -> bool:
@@ -17,9 +18,11 @@ def _is_enabled() -> bool:
 def _configure_auth_token() -> None:
     if ngrok is None:
         return
-    token = os.getenv("NGROK_AUTHTOKEN")
-    if token:
-        ngrok.set_auth_token(token)
+    for env_var in _AUTHTOKEN_ENV_VARS:
+        token = os.getenv(env_var, "").strip()
+        if token:
+            ngrok.set_auth_token(token)
+            return
 
 
 async def start_tunnel(port: int = 8000) -> Optional[str]:
