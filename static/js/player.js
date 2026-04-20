@@ -554,6 +554,10 @@ async function loadAndPlay(video) {
             
             player.src({ src: proxyUrl, type: 'video/mp4' });
         }
+
+        // Re-apply after source lifecycle events because Video.js tech can restore default volume.
+        player.one('loadedmetadata', applyPreferredVolumeState);
+        player.one('canplay', applyPreferredVolumeState);
         applyPreferredVolumeState();
         currentVideoId = video.id;
         
@@ -561,6 +565,7 @@ async function loadAndPlay(video) {
         if (playPromise !== undefined) {
             await playPromise;
         }
+        applyPreferredVolumeState();
         
         if (wasFullscreen) {
             const videoWrapper = document.querySelector('.video-wrapper');
