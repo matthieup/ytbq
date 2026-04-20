@@ -15,6 +15,7 @@ let isPlaying = false;
 let bufferCheckInterval = null;
 let lowBufferCount = 0;
 let maxLowBufferRetries = 2;
+let isSwitchingVideo = false;
 
 let isFullscreen = false;
 
@@ -531,7 +532,9 @@ async function playNext() {
 
 async function loadAndPlay(video) {
     try {
+        isSwitchingVideo = true;
         const wasFullscreen = isFullscreen;
+        currentVideoId = null;
         player.reset();
         applyPreferredVolumeState();
         stallCount = 0;
@@ -565,7 +568,9 @@ async function loadAndPlay(video) {
                 videoWrapper.requestFullscreen();
             }
         }
+        isSwitchingVideo = false;
     } catch (error) {
+        isSwitchingVideo = false;
         console.error('Playback error:', error);
         stallCount++;
         if (stallCount <= maxStallRetries) {
@@ -717,6 +722,9 @@ function setupControls() {
         });
         
         player.on('volumechange', () => {
+            if (isSwitchingVideo) {
+                return;
+            }
             if (volumeSlider) {
                 volumeSlider.value = Math.round(player.volume() * 100);
                 updateVolumeSliderVisual();
