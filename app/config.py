@@ -50,3 +50,7 @@ def update_config(key: str, value):
         json.dump(_config, f, indent=4)
     reload_config()
     return get_config_dict()
+
+
+def set_base_url(base_url: str):
+    return update_config("base_url", base_url)

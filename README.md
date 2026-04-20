@@ -59,6 +59,11 @@ python run.py
 ```
 
 The server runs on `0.0.0.0:8000`.
+On startup, the app also creates an ngrok tunnel and updates `config.json.base_url` to the ngrok public URL.
+
+Environment variables:
+- `NGROK_AUTOSTART` (default: `1`): set to `0` to disable automatic tunnel startup
+- `NGROK_AUTHTOKEN` (optional): your ngrok auth token for stable limits/features
 
 - **Main Display**: `http://localhost:8000/` - Shows the video player and queue
 - **Guest Join**: `http://localhost:8000/join` - Mobile-friendly interface for guests
