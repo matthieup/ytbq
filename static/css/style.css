@@ -202,16 +202,29 @@ body {
     height: 4px;
     -webkit-appearance: none;
     appearance: none;
-    background: var(--border);
+    --volume-level: 80%;
+    background: linear-gradient(
+        to right,
+        var(--accent) 0%,
+        var(--accent) var(--volume-level),
+        var(--border) var(--volume-level),
+        var(--border) 100%
+    );
     border-radius: 2px;
     cursor: pointer;
+    transition: filter 0.2s ease;
+}
+
+.volume-slider:hover {
+    filter: brightness(1.1);
 }
 
 .volume-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     width: 16px;
     height: 16px;
-    background: var(--text-primary);
+    background: var(--accent);
+    border: 2px solid var(--text-primary);
     border-radius: 50%;
     cursor: pointer;
 }
@@ -219,10 +232,10 @@ body {
 .volume-slider::-moz-range-thumb {
     width: 16px;
     height: 16px;
-    background: var(--text-primary);
+    background: var(--accent);
+    border: 2px solid var(--text-primary);
     border-radius: 50%;
     cursor: pointer;
-    border: none;
 }
 
 .quality-control {

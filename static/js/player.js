@@ -18,6 +18,45 @@ let maxLowBufferRetries = 2;
 
 let isFullscreen = false;
 
+function clampVolume(value) {
+    const numeric = Number(value);
+    if (Number.isNaN(numeric)) return 0.8;
+    return Math.max(0, Math.min(1, numeric));
+}
+
+function getPreferredVolumeState() {
+    const volumeSlider = document.getElementById('volumeSlider');
+    const savedVolume = localStorage.getItem('ytbq_volume');
+    const savedMuted = localStorage.getItem('ytbq_muted');
+    const sliderVolume = volumeSlider ? Number(volumeSlider.value) / 100 : NaN;
+    const parsedSavedVolume = savedVolume !== null ? Number(savedVolume) : NaN;
+
+    const volume = !Number.isNaN(parsedSavedVolume)
+        ? clampVolume(parsedSavedVolume)
+        : clampVolume(sliderVolume);
+
+    return {
+        volume,
+        muted: savedMuted === 'true',
+    };
+}
+
+function applyPreferredVolumeState() {
+    if (!player) return;
+
+    const volumeSlider = document.getElementById('volumeSlider');
+    const { volume, muted } = getPreferredVolumeState();
+
+    player.volume(volume);
+    player.muted(muted);
+
+    if (volumeSlider) {
+        const sliderPercent = Math.round(volume * 100);
+        volumeSlider.value = sliderPercent;
+        volumeSlider.style.setProperty('--volume-level', `${sliderPercent}%`);
+    }
+}
+
 function init() {
     fetch('/api/current/clear', { method: 'POST' });
     
@@ -494,6 +533,7 @@ async function loadAndPlay(video) {
     try {
         const wasFullscreen = isFullscreen;
         player.reset();
+        applyPreferredVolumeState();
         stallCount = 0;
         clearStallRecovery();
         
@@ -511,6 +551,7 @@ async function loadAndPlay(video) {
             
             player.src({ src: proxyUrl, type: 'video/mp4' });
         }
+        applyPreferredVolumeState();
         currentVideoId = video.id;
         
         const playPromise = player.play();
@@ -569,6 +610,12 @@ function setupControls() {
     const fullscreenBtn = document.getElementById('fullscreenBtn');
     const qualitySelect = document.getElementById('qualitySelect');
     const multipleVideosToggle = document.getElementById('multipleVideosToggle');
+    const updateVolumeSliderVisual = () => {
+        if (!volumeSlider) return;
+        const sliderValue = Number(volumeSlider.value);
+        const safeValue = Number.isNaN(sliderValue) ? 0 : Math.max(0, Math.min(100, sliderValue));
+        volumeSlider.style.setProperty('--volume-level', `${safeValue}%`);
+    };
     
     const videoWrapper = document.querySelector('.video-wrapper');
     
@@ -626,6 +673,7 @@ function setupControls() {
             if (player.muted()) {
                 player.muted(false);
                 volumeSlider.value = player.volume() * 100;
+                updateVolumeSliderVisual();
             } else {
                 player.muted(true);
             }
@@ -654,10 +702,13 @@ function setupControls() {
         if (savedMuted === 'true') {
             player.muted(true);
         }
+        updateVolumeSliderVisual();
+        applyPreferredVolumeState();
         
         volumeSlider.addEventListener('input', (e) => {
             const vol = e.target.value / 100;
             player.volume(vol);
+            updateVolumeSliderVisual();
             localStorage.setItem('ytbq_volume', vol);
             if (vol > 0) {
                 player.muted(false);
@@ -666,6 +717,10 @@ function setupControls() {
         });
         
         player.on('volumechange', () => {
+            if (volumeSlider) {
+                volumeSlider.value = Math.round(player.volume() * 100);
+                updateVolumeSliderVisual();
+            }
             localStorage.setItem('ytbq_volume', player.volume());
             localStorage.setItem('ytbq_muted', player.muted());
         });
