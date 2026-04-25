@@ -12,6 +12,7 @@ ALLOW_MULTIPLE_VIDEOS = _config.get("allow_multiple_videos", True)
 MULTIPLE_VIDEOS_LOCKED = _config.get("multiple_videos_locked", False)
 AUTO_QUEUE_ENABLED = _config.get("auto_queue_enabled", False)
 AUTO_QUEUE_LOCKED = _config.get("auto_queue_locked", False)
+LOGO_PATH = _config.get("logo_path", "")
 
 
 def reload_config():
@@ -22,7 +23,8 @@ def reload_config():
         ALLOW_MULTIPLE_VIDEOS, \
         MULTIPLE_VIDEOS_LOCKED, \
         AUTO_QUEUE_ENABLED, \
-        AUTO_QUEUE_LOCKED
+        AUTO_QUEUE_LOCKED, \
+        LOGO_PATH
     with open(_config_path) as f:
         _config = json.load(f)
     BASE_URL = _config.get("base_url", "http://localhost:8000")
@@ -31,6 +33,7 @@ def reload_config():
     MULTIPLE_VIDEOS_LOCKED = _config.get("multiple_videos_locked", False)
     AUTO_QUEUE_ENABLED = _config.get("auto_queue_enabled", False)
     AUTO_QUEUE_LOCKED = _config.get("auto_queue_locked", False)
+    LOGO_PATH = _config.get("logo_path", "")
 
 
 def get_config_dict():
@@ -41,6 +44,7 @@ def get_config_dict():
         "multiple_videos_locked": MULTIPLE_VIDEOS_LOCKED,
         "auto_queue_enabled": AUTO_QUEUE_ENABLED,
         "auto_queue_locked": AUTO_QUEUE_LOCKED,
+        "logo_path": LOGO_PATH,
     }
 
 

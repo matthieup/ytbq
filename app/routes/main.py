@@ -4,7 +4,17 @@ from fastapi.templating import Jinja2Templates
 from app.services.youtube import youtube_service
 from app.services.queue import queue_service
 from app.models.schemas import QueueItem
-import app.config as app_config
+from app.config import (
+    BASE_URL,
+    VIDEO_QUALITY,
+    ALLOW_MULTIPLE_VIDEOS,
+    MULTIPLE_VIDEOS_LOCKED,
+    AUTO_QUEUE_ENABLED,
+    AUTO_QUEUE_LOCKED,
+    LOGO_PATH,
+    get_config_dict,
+    update_config,
+)
 from pydantic import BaseModel
 import qrcode
 import io
@@ -21,17 +31,18 @@ _hls_cache: dict = {}
 
 @router.get("/", response_class=HTMLResponse)
 async def main_display(request: Request):
-    join_url = f"{app_config.BASE_URL}/join"
+    join_url = f"{BASE_URL}/join"
     return templates.TemplateResponse(
         request=request,
         name="main.html",
         context={
             "join_url": join_url,
-            "video_quality": app_config.VIDEO_QUALITY,
-            "allow_multiple_videos": app_config.ALLOW_MULTIPLE_VIDEOS,
-            "multiple_videos_locked": app_config.MULTIPLE_VIDEOS_LOCKED,
-            "auto_queue_enabled": app_config.AUTO_QUEUE_ENABLED,
-            "auto_queue_locked": app_config.AUTO_QUEUE_LOCKED,
+            "video_quality": VIDEO_QUALITY,
+            "allow_multiple_videos": ALLOW_MULTIPLE_VIDEOS,
+            "multiple_videos_locked": MULTIPLE_VIDEOS_LOCKED,
+            "auto_queue_enabled": AUTO_QUEUE_ENABLED,
+            "auto_queue_locked": AUTO_QUEUE_LOCKED,
+            "logo_path": LOGO_PATH,
         },
     )
 
@@ -43,7 +54,7 @@ async def join_page(request: Request):
 
 @router.get("/qr")
 async def get_qr_code():
-    join_url = f"{app_config.BASE_URL}/join"
+    join_url = f"{BASE_URL}/join"
 
     qr = qrcode.QRCode(version=1, box_size=10, border=2)
     qr.add_data(join_url)
@@ -59,7 +70,7 @@ async def get_qr_code():
 
 @router.get("/api/config")
 async def get_config():
-    return app_config.get_config_dict()
+    return get_config_dict()
 
 
 class ConfigUpdate(BaseModel):
@@ -74,7 +85,7 @@ async def set_config(config: ConfigUpdate):
         return {"success": False, "error": "Invalid config key"}
     return {
         "success": True,
-        "config": app_config.update_config(config.key, config.value),
+        "config": update_config(config.key, config.value),
     }
 
 
@@ -311,7 +322,7 @@ async def proxy_segment(url: str, cache_key: str = None):
 
 @router.post("/api/queue")
 async def add_to_queue(item: QueueItem):
-    if not app_config.ALLOW_MULTIPLE_VIDEOS and item.user_id:
+    if not ALLOW_MULTIPLE_VIDEOS and item.user_id:
         has_video = await queue_service.user_has_video_in_queue(item.user_id)
         if has_video:
             return {
@@ -343,7 +354,7 @@ async def get_next_video():
     if video:
         return {"video": video.model_dump(mode="json")}
 
-    if app_config.AUTO_QUEUE_ENABLED:
+    if AUTO_QUEUE_ENABLED:
         last_video = queue_service.get_last_played_video()
         if last_video and last_video.get("channel"):
             auto_video = await auto_queue_from_artist(
