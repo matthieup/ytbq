@@ -23,4 +23,6 @@ queue_state.json
 play_counts.json
 
 uv.lock
-uv.lock
+
+# Environment variables
+.env

@@ -5,13 +5,13 @@ from app.services.youtube import youtube_service
 from app.services.queue import queue_service
 from app.models.schemas import QueueItem
 from app.config import (
-    BASE_URL,
     VIDEO_QUALITY,
     ALLOW_MULTIPLE_VIDEOS,
     MULTIPLE_VIDEOS_LOCKED,
     AUTO_QUEUE_ENABLED,
     AUTO_QUEUE_LOCKED,
     LOGO_PATH,
+    MAX_DURATION_SECONDS,
     get_config_dict,
     update_config,
 )
@@ -31,18 +31,19 @@ _hls_cache: dict = {}
 
 @router.get("/", response_class=HTMLResponse)
 async def main_display(request: Request):
-    join_url = f"{BASE_URL}/join"
+    config = get_config_dict()
+    join_url = f"{config['base_url']}/join"
     return templates.TemplateResponse(
         request=request,
         name="main.html",
         context={
             "join_url": join_url,
-            "video_quality": VIDEO_QUALITY,
-            "allow_multiple_videos": ALLOW_MULTIPLE_VIDEOS,
-            "multiple_videos_locked": MULTIPLE_VIDEOS_LOCKED,
-            "auto_queue_enabled": AUTO_QUEUE_ENABLED,
-            "auto_queue_locked": AUTO_QUEUE_LOCKED,
-            "logo_path": LOGO_PATH,
+            "video_quality": config["video_quality"],
+            "allow_multiple_videos": config["allow_multiple_videos"],
+            "multiple_videos_locked": config["multiple_videos_locked"],
+            "auto_queue_enabled": config["auto_queue_enabled"],
+            "auto_queue_locked": config["auto_queue_locked"],
+            "logo_path": config["logo_path"],
         },
     )
 
@@ -54,7 +55,8 @@ async def join_page(request: Request):
 
 @router.get("/qr")
 async def get_qr_code():
-    join_url = f"{BASE_URL}/join"
+    config = get_config_dict()
+    join_url = f"{config['base_url']}/join"
 
     qr = qrcode.QRCode(version=1, box_size=10, border=2)
     qr.add_data(join_url)
@@ -102,7 +104,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @router.get("/api/search")
 async def search_videos(q: str, limit: int = 10):
-    results = youtube_service.search_videos(q, limit)
+    results = youtube_service.search_videos(q, limit, MAX_DURATION_SECONDS)
     return results
 
 

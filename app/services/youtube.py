@@ -111,7 +111,7 @@ class YouTubeService:
 
         return removed_count
 
-    def search_videos(self, query: str, limit: int = 10) -> List[VideoResult]:
+    def search_videos(self, query: str, limit: int = 10, max_duration: int = None) -> List[VideoResult]:
         print(f"Searching for: {query} (limit: {limit})")
         search_opts = {
             **self.ydl_opts,
@@ -122,26 +122,31 @@ class YouTubeService:
         try:
             with yt_dlp.YoutubeDL(search_opts) as ydl:
                 search_results = ydl.extract_info(
-                    f"ytsearch{limit}:{query}", download=False
+                    f"ytsearch{limit * 2}:{query}", download=False
                 )
 
                 if search_results and "entries" in search_results:
                     print(f"Found {len(search_results['entries'])} results")
                     for entry in search_results["entries"]:
                         if entry:
+                            duration = entry.get("duration")
+                            if max_duration and duration and duration > max_duration:
+                                continue
+                            
                             results.append(
                                 VideoResult(
                                     id=entry.get("id", ""),
                                     title=entry.get("title", "Unknown"),
                                     thumbnail=self._get_best_thumbnail(entry),
-                                    duration=self._format_duration(
-                                        entry.get("duration")
-                                    ),
+                                    duration=self._format_duration(duration),
                                     channel=entry.get("uploader")
                                     or entry.get("channel"),
                                     view_count=entry.get("view_count"),
                                 )
                             )
+                            
+                            if len(results) >= limit:
+                                break
         except Exception as e:
             print(f"Search error: {e}")
 

@@ -97,6 +97,11 @@
     </div>
     
     <div class="resize-handle" id="resizeHandle"></div>
+    {% if logo_path %}
+    <div class="logo-container">
+        <img src="{{ logo_path }}" alt="Logo" class="logo-img">
+    </div>
+    {% endif %}
     <div class="queue-section" id="queueSection">
         <div class="queue-header">
             <h2>Queue (<span id="queueCount">0</span>)</h2>
@@ -107,11 +112,6 @@
                 Clear
             </button>
         </div>
-        {% if logo_path %}
-        <div class="logo-container">
-            <img src="{{ logo_path }}" alt="Logo" class="logo-img">
-        </div>
-        {% endif %}
         <div class="qr-inline">
             <img src="/qr" alt="Scan to join" class="qr-inline-img">
             <p class="qr-inline-text">Scan to add videos</p>

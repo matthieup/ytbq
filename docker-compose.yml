@@ -6,9 +6,14 @@ services:
     container_name: ytbq
     ports:
       - "8000:8000"
+    env_file:
+      - .env
     volumes:
-      # Persist video cache between restarts
-      - ./video_cache:/app/video_cache
+      # Use tmpfs for video cache to limit SD card writes
+      - type: tmpfs
+        target: /app/video_cache
+        tmpfs:
+          size: 2G
       # Persist database
       - ./ytbq.db:/app/ytbq.db
       # Mount config if needed
@@ -16,6 +21,14 @@ services:
     environment:
       - HOST=0.0.0.0
       - PORT=8000
+      - BASE_URL=${BASE_URL:-}
+      - VIDEO_QUALITY=${VIDEO_QUALITY:-}
+      - ALLOW_MULTIPLE_VIDEOS=${ALLOW_MULTIPLE_VIDEOS:-}
+      - MULTIPLE_VIDEOS_LOCKED=${MULTIPLE_VIDEOS_LOCKED:-}
+      - AUTO_QUEUE_ENABLED=${AUTO_QUEUE_ENABLED:-}
+      - AUTO_QUEUE_LOCKED=${AUTO_QUEUE_LOCKED:-}
+      - LOGO_PATH=${LOGO_PATH:-}
+      - MAX_DURATION_SECONDS=${MAX_DURATION_SECONDS:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
