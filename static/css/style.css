@@ -74,17 +74,27 @@ body {
     border-radius: 1px;
 }
 
-.queue-section {
+.queue-sidebar {
     width: 350px;
     min-width: 250px;
     max-width: 600px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    min-height: 0;
+    flex-shrink: 0;
+}
+
+.queue-section {
+    width: 100%;
     background: var(--bg-secondary);
     border-radius: 12px;
     padding: 15px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    flex-shrink: 0;
+    min-height: 0;
+    flex: 1;
 }
 
 .now-playing {
@@ -165,6 +175,7 @@ body {
     align-items: center;
     justify-content: center;
     transition: background 0.2s, transform 0.1s;
+    position: relative;
 }
 
 .control-btn:hover {
@@ -174,6 +185,53 @@ body {
 .control-btn:active {
     transform: scale(0.95);
 }
+.control-btn.active {
+    background: var(--accent);
+}
+.control-btn.active::after {
+    content: "";
+    position: absolute;
+    bottom: 2px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 18px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--text-primary);
+}
+
+.control-btn.unavailable {
+    opacity: 0.45;
+}
+
+.control-btn.unavailable:hover {
+    background: var(--bg-tertiary);
+}
+
+.control-btn.loading {
+    cursor: progress;
+    padding: 0;
+}
+
+/* Neutralize the generic full-width .loading spinner (see below) on control buttons */
+.control-btn.loading::after {
+    content: none;
+}
+
+.control-btn.loading::before {
+    content: "";
+    position: absolute;
+    bottom: 4px;
+    right: 4px;
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.35);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+
 
 .control-btn svg {
     width: 24px;
@@ -335,7 +393,6 @@ body {
 
 .logo-container {
     text-align: center;
-    margin-bottom: 15px;
     padding: 10px;
     background: var(--bg-tertiary);
     border-radius: 8px;
@@ -437,12 +494,46 @@ body {
     background: #3a3a3a;
 }
 
-.queue-item-thumb {
+.queue-item-thumbnail {
+    position: relative;
     width: 100px;
     height: 56px;
-    object-fit: cover;
     border-radius: 4px;
+    overflow: hidden;
     flex-shrink: 0;
+}
+
+.queue-item-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.queue-item-download-indicator {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    background: rgba(0, 0, 0, 0.72);
+    color: white;
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+.queue-item.downloading .queue-item-download-indicator {
+    display: flex;
+}
+
+.queue-item-download-spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
 }
 
 .queue-item-info {
@@ -1012,8 +1103,12 @@ body {
 }
 
 .theater-mode .queue-section {
-    width: 100%;
     max-height: 200px;
+}
+
+.theater-mode .queue-sidebar {
+    width: 100%;
+    max-width: none;
 }
 
 @media (max-width: 900px) {
@@ -1021,8 +1116,12 @@ body {
         flex-direction: column;
     }
     
-    .queue-section {
+    .queue-sidebar {
         width: 100%;
+        max-width: none;
+    }
+
+    .queue-section {
         max-height: 200px;
     }
 }
@@ -1036,4 +1135,22 @@ body {
         width: 100px;
         height: 56px;
     }
+}
+
+/* Subtitles: single line, horizontally centered, near the bottom */
+.video-js .vjs-text-track-display .vjs-text-track-cue {
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    width: max-content !important;
+    max-width: 90% !important;
+    text-align: center !important;
+}
+
+.video-js ::cue {
+    white-space: nowrap;
+    text-align: center;
+    background: rgba(0, 0, 0, 0.75);
+    color: #ffffff;
+    font-size: 1.15em;
+    line-height: 1.2;
 }

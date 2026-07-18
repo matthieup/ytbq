@@ -37,6 +37,11 @@
                 </svg>
                 <input type="range" id="volumeSlider" min="0" max="100" value="80" class="volume-slider">
             </div>
+            <button class="control-btn" id="subtitlesBtn" title="Toggle subtitles" aria-pressed="false">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H5V6h14v12zM7 13h2v2H7v-2zm0-4h2v2H7V9zm4 4h6v2h-6v-2zm0-4h6v2h-6V9z"/>
+                </svg>
+            </button>
             <button class="control-btn" id="fullscreenBtn" title="Fullscreen">
                 <svg viewBox="0 0 24 24" fill="currentColor">
                     <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
@@ -97,28 +102,30 @@
     </div>
     
     <div class="resize-handle" id="resizeHandle"></div>
-    {% if logo_path %}
-    <div class="logo-container">
-        <img src="{{ logo_path }}" alt="Logo" class="logo-img">
-    </div>
-    {% endif %}
-    <div class="queue-section" id="queueSection">
-        <div class="queue-header">
-            <h2>Queue (<span id="queueCount">0</span>)</h2>
-            <button class="clear-queue-btn" id="clearQueueBtn" title="Clear queue">
-                <svg viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
-                </svg>
-                Clear
-            </button>
+    <div class="queue-sidebar" id="queueSidebar">
+        {% if logo_path %}
+        <div class="logo-container">
+            <img src="{{ logo_path }}" alt="Logo" class="logo-img">
         </div>
-        <div class="qr-inline">
-            <img src="/qr" alt="Scan to join" class="qr-inline-img">
-            <p class="qr-inline-text">Scan to add videos</p>
-        </div>
-        <div class="queue-list" id="queueList">
-            <div class="empty-queue">
-                <p>No videos in queue</p>
+        {% endif %}
+        <div class="queue-section" id="queueSection">
+            <div class="queue-header">
+                <h2>Queue (<span id="queueCount">0</span>)</h2>
+                <button class="clear-queue-btn" id="clearQueueBtn" title="Clear queue">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                    </svg>
+                    Clear
+                </button>
+            </div>
+            <div class="qr-inline">
+                <img src="/qr" alt="Scan to join" class="qr-inline-img">
+                <p class="qr-inline-text">Scan to add videos</p>
+            </div>
+            <div class="queue-list" id="queueList">
+                <div class="empty-queue">
+                    <p>No videos in queue</p>
+                </div>
             </div>
         </div>
     </div>

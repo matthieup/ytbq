@@ -16,8 +16,12 @@ let bufferCheckInterval = null;
 let lowBufferCount = 0;
 let maxLowBufferRetries = 2;
 let isSwitchingVideo = false;
+let hasReceivedQueueState = false;
+let wasQueueEmpty = true;
+let backgroundDownloadingVideoIds = new Set();
 
 let isFullscreen = false;
+let subtitlesEnabled = localStorage.getItem('ytbq_subtitles') === 'true';
 
 function clampVolume(value) {
     const numeric = Number(value);
@@ -379,6 +383,11 @@ function updateQueueUI(state) {
     const currentTitle = document.getElementById('currentTitle');
     const currentChannel = document.getElementById('currentChannel');
     const queueCount = document.getElementById('queueCount');
+    const queueHasItems = Boolean(state.items && state.items.length > 0);
+    const shouldStartPlayback = hasReceivedQueueState
+        && wasQueueEmpty
+        && queueHasItems
+        && !state.current;
 
     if (queueCount) {
         queueCount.textContent = state.items ? state.items.length : 0;
@@ -418,8 +427,14 @@ function updateQueueUI(state) {
                 ${showAsPlaying ? 'Now Playing' : 'Start Playing'}
             </button>
             ${state.items.map((item, index) => `
-                <div class="queue-item ${index === 0 && !showAsPlaying ? 'next-up' : ''}" data-index="${index}" data-id="${item.id}" draggable="true">
-                    <img class="queue-item-thumb" src="${item.thumbnail}" alt="${item.title}">
+                <div class="queue-item ${index === 0 && !showAsPlaying ? 'next-up' : ''} ${backgroundDownloadingVideoIds.has(item.id) ? 'downloading' : ''}" data-index="${index}" data-id="${item.id}" draggable="true">
+                    <div class="queue-item-thumbnail">
+                        <img class="queue-item-thumb" src="${item.thumbnail}" alt="${item.title}">
+                        <div class="queue-item-download-indicator" title="Downloading in background" aria-label="Downloading in background">
+                            <span class="queue-item-download-spinner"></span>
+                            <span>Downloading</span>
+                        </div>
+                    </div>
                     <div class="queue-item-info">
                         <div class="queue-item-title">${item.title}</div>
                         <div class="queue-item-meta">
@@ -451,6 +466,18 @@ function updateQueueUI(state) {
             </div>
         `;
     }
+
+    hasReceivedQueueState = true;
+    wasQueueEmpty = !queueHasItems;
+
+    if (shouldStartPlayback) {
+        const debounceDelay = Math.max(0, 2100 - (Date.now() - lastPlayNextCall));
+        setTimeout(() => {
+            if (!currentVideoId && queueItems.length > 0) {
+                playNext();
+            }
+        }, debounceDelay);
+    }
 }
 
 async function preloadNextVideo(video) {
@@ -481,9 +508,10 @@ async function downloadNextVideo() {
     if (!queueItems || queueItems.length === 0) return;
     
     const nextVideo = queueItems[0];
-    if (!nextVideo || nextVideo.id === currentVideoId) return;
+    if (!nextVideo || nextVideo.id === currentVideoId || backgroundDownloadingVideoIds.has(nextVideo.id)) return;
     
     console.log('Triggering background download of next video:', nextVideo.id);
+    setBackgroundDownloadState(nextVideo.id, true);
     
     try {
         let prepareUrl = `/api/cache/${nextVideo.id}/prepare`;
@@ -491,18 +519,31 @@ async function downloadNextVideo() {
             prepareUrl += `?quality=${currentQuality}`;
         }
         
-        fetch(prepareUrl, { method: 'POST' }).then(response => {
-            if (response.ok) {
-                console.log('Next video download triggered successfully');
-            } else {
-                console.error('Failed to trigger download');
-            }
-        }).catch(err => {
-            console.error('Download trigger failed:', err);
-        });
+        const response = await fetch(prepareUrl, { method: 'POST' });
+        if (response.ok) {
+            console.log('Next video download completed successfully');
+        } else {
+            console.error('Failed to download next video');
+        }
     } catch (error) {
-        console.error('Failed to initiate download:', error);
+        console.error('Background download failed:', error);
+    } finally {
+        setBackgroundDownloadState(nextVideo.id, false);
     }
+}
+
+function setBackgroundDownloadState(videoId, isDownloading) {
+    if (isDownloading) {
+        backgroundDownloadingVideoIds.add(videoId);
+    } else {
+        backgroundDownloadingVideoIds.delete(videoId);
+    }
+
+    document.querySelectorAll('.queue-item').forEach(item => {
+        if (item.dataset.id === videoId) {
+            item.classList.toggle('downloading', isDownloading);
+        }
+    });
 }
 
 async function playNext() {
@@ -527,6 +568,108 @@ async function playNext() {
         }
     } catch (error) {
         console.error('playNext error:', error);
+    }
+}
+
+function subtitlesWanted() {
+    return localStorage.getItem('ytbq_subtitles') === 'true';
+}
+
+function clearSubtitlesTrack() {
+    if (!player) return;
+    const existing = player.remoteTextTracks();
+    for (let i = existing.length - 1; i >= 0; i--) {
+        player.removeRemoteTextTrack(existing[i]);
+    }
+    let videoEl = null;
+    try {
+        videoEl = player.tech().el();
+    } catch (e) {
+        videoEl = player.el().querySelector('video');
+    }
+    if (videoEl && typeof videoEl.querySelectorAll === 'function') {
+        videoEl.querySelectorAll('track').forEach(t => t.remove());
+    }
+}
+
+function setSubtitlesButtonState(state) {
+    const subtitlesBtn = document.getElementById('subtitlesBtn');
+    if (!subtitlesBtn) return;
+    subtitlesBtn.classList.remove('loading', 'active', 'unavailable');
+    const icon = subtitlesBtn.querySelector('svg');
+    switch (state) {
+        case 'loading':
+            subtitlesBtn.classList.add('loading');
+            subtitlesBtn.setAttribute('title', 'Loading subtitles...');
+            if (icon) icon.style.display = '';
+            break;
+        case 'on':
+            subtitlesBtn.classList.add('active');
+            subtitlesBtn.setAttribute('title', 'Subtitles on (click to turn off)');
+            if (icon) icon.style.display = '';
+            break;
+        case 'unavailable':
+            subtitlesBtn.classList.add('unavailable');
+            subtitlesBtn.setAttribute('title', 'No subtitles available for this video');
+            if (icon) icon.style.display = '';
+            break;
+        default: // 'off'
+            subtitlesBtn.setAttribute('title', 'Subtitles off (click to turn on)');
+            if (icon) icon.style.display = '';
+    }
+}
+
+async function attachSubtitlesTrack(videoId) {
+    if (!player || !videoId) return;
+    if (!subtitlesWanted()) return;
+    clearSubtitlesTrack();
+    setSubtitlesButtonState('loading');
+
+    try {
+        const resp = await fetch(`/api/subtitles/${videoId}`);
+        if (!resp.ok || resp.status === 204) {
+            setSubtitlesButtonState('unavailable');
+            return;
+        }
+        const text = await resp.text();
+        if (!text) {
+            setSubtitlesButtonState('unavailable');
+            return;
+        }
+        const blob = new Blob([text], { type: 'text/vtt' });
+        const url = URL.createObjectURL(blob);
+        player.addRemoteTextTrack({
+            kind: 'subtitles',
+            label: 'Subtitles',
+            language: 'en',
+            src: url,
+            default: true,
+        }, false);
+        const tracks = player.textTracks();
+        for (let i = 0; i < tracks.length; i++) {
+            if (tracks[i].kind === 'subtitles') {
+                tracks[i].mode = 'showing';
+            }
+        }
+        setSubtitlesButtonState('on');
+    } catch (err) {
+        console.error('Failed to load subtitles:', err);
+        setSubtitlesButtonState('unavailable');
+    }
+}
+
+function setSubtitlesEnabled(enabled) {
+    subtitlesEnabled = !!enabled;
+    localStorage.setItem('ytbq_subtitles', subtitlesEnabled ? 'true' : 'false');
+    const subtitlesBtn = document.getElementById('subtitlesBtn');
+    if (subtitlesBtn) {
+        subtitlesBtn.setAttribute('aria-pressed', subtitlesEnabled ? 'true' : 'false');
+    }
+    if (subtitlesEnabled && currentVideoId) {
+        attachSubtitlesTrack(currentVideoId);
+    } else {
+        clearSubtitlesTrack();
+        setSubtitlesButtonState('off');
     }
 }
 
@@ -560,7 +703,7 @@ async function loadAndPlay(video) {
         player.one('canplay', applyPreferredVolumeState);
         applyPreferredVolumeState();
         currentVideoId = video.id;
-        
+        attachSubtitlesTrack(currentVideoId);
         const playPromise = player.play();
         if (playPromise !== undefined) {
             await playPromise;
@@ -611,6 +754,14 @@ function setupControls() {
     if (skipBtn) {
         skipBtn.addEventListener('click', playNext);
     }
+    const subtitlesBtn = document.getElementById('subtitlesBtn');
+    if (subtitlesBtn) {
+        subtitlesBtn.setAttribute('aria-pressed', subtitlesEnabled ? 'true' : 'false');
+        setSubtitlesButtonState(subtitlesEnabled ? 'on' : 'off');
+        subtitlesBtn.addEventListener('click', () => {
+            setSubtitlesEnabled(!subtitlesEnabled);
+        });
+    }
     
     const playPauseBtn = document.getElementById('playPauseBtn');
     const playIcon = document.getElementById('playIcon');
@@ -655,6 +806,25 @@ function setupControls() {
                 document.exitFullscreen();
             }
         });
+    }
+
+    if (videoWrapper) {
+        videoWrapper.addEventListener('wheel', (e) => {
+            if (!player) return;
+            e.preventDefault();
+            const step = e.deltaY < 0 ? 0.05 : -0.05;
+            const next = Math.max(0, Math.min(1, player.volume() + step));
+            player.volume(next);
+            if (next > 0) {
+                player.muted(false);
+            }
+            if (volumeSlider) {
+                volumeSlider.value = Math.round(next * 100);
+                volumeSlider.style.setProperty('--volume-level', `${Math.round(next * 100)}%`);
+            }
+            localStorage.setItem('ytbq_volume', next);
+            localStorage.setItem('ytbq_muted', player.muted() ? 'true' : 'false');
+        }, { passive: false });
     }
 
     if (playPauseBtn) {
@@ -1020,9 +1190,9 @@ function escapeHtml(text) {
 
 function setupResizeHandle() {
     const resizeHandle = document.getElementById('resizeHandle');
-    const queueSection = document.getElementById('queueSection');
+    const queueSidebar = document.getElementById('queueSidebar');
     
-    if (!resizeHandle || !queueSection) return;
+    if (!resizeHandle || !queueSidebar) return;
     
     let isResizing = false;
     let startX = 0;
@@ -1031,7 +1201,7 @@ function setupResizeHandle() {
     resizeHandle.addEventListener('mousedown', (e) => {
         isResizing = true;
         startX = e.clientX;
-        startWidth = queueSection.offsetWidth;
+        startWidth = queueSidebar.offsetWidth;
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
         e.preventDefault();
@@ -1043,7 +1213,7 @@ function setupResizeHandle() {
         const diff = startX - e.clientX;
         const newWidth = Math.max(250, Math.min(600, startWidth + diff));
         
-        queueSection.style.width = newWidth + 'px';
+        queueSidebar.style.width = newWidth + 'px';
         localStorage.setItem('ytbq_queue_width', newWidth);
     });
     
@@ -1059,7 +1229,7 @@ function setupResizeHandle() {
     if (savedWidth) {
         const width = parseInt(savedWidth);
         if (width >= 250 && width <= 600) {
-            queueSection.style.width = width + 'px';
+            queueSidebar.style.width = width + 'px';
         }
     }
 }

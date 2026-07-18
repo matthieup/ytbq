@@ -316,6 +316,72 @@ class YouTubeService:
             "thumbnail", f"https://i.ytimg.com/vi/{entry.get('id', '')}/hqdefault.jpg"
         )
 
+    def get_subtitles(self, video_id: str, lang: str = "en") -> Optional[str]:
+        """Fetch subtitles for a video and return WebVTT content.
+
+        Prefers manual captions in the requested language, falls back to
+        auto-generated captions, then to any available language. Returns
+        raw WebVTT text (yt-dlp writes vtt files), or None if unavailable.
+        """
+        print(f"Fetching subtitles for: {video_id} (lang: {lang})")
+        opts = {
+            **self.ydl_opts,
+            "skip_download": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": [lang] if lang != "all" else [],
+            "subtitlesformat": "vtt",
+            "outtmpl": str(CACHE_DIR / f"{video_id}_sub"),
+        }
+
+        def _fetch():
+            try:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(
+                        f"https://www.youtube.com/watch?v={video_id}", download=False
+                    )
+
+                subtitles = (info or {}).get("subtitles", {}) or {}
+                auto_subs = (info or {}).get("automatic_captions", {}) or {}
+
+                # Prefer manual subs in requested language, then any manual sub,
+                # then auto sub in requested language, then any auto sub.
+                candidates = []
+                if lang != "all":
+                    if lang in subtitles:
+                        candidates.append(("manual", lang))
+                    if lang in auto_subs:
+                        candidates.append(("auto", lang))
+                for l in subtitles:
+                    if ("manual", l) not in candidates:
+                        candidates.append(("manual", l))
+                for l in auto_subs:
+                    if ("auto", l) not in candidates:
+                        candidates.append(("auto", l))
+
+                for kind, sub_lang in candidates:
+                    source = subtitles if kind == "manual" else auto_subs
+                    tracks = source.get(sub_lang, [])
+                    for track in tracks:
+                        ext = track.get("ext") or track.get("name", "").rsplit(".", 1)[-1]
+                        if ext != "vtt":
+                            continue
+                        url = track.get("url")
+                        if not url:
+                            continue
+                        import httpx
+                        resp = httpx.get(url, timeout=30.0, follow_redirects=True)
+                        if resp.status_code == 200 and resp.text:
+                            return resp.text
+
+                print(f"No VTT subtitles found for {video_id}")
+                return None
+            except Exception as e:
+                print(f"Subtitle error for {video_id}: {e}")
+                return None
+
+        return asyncio.to_thread(_fetch)
+
     def _format_duration(self, seconds) -> Optional[str]:
         if seconds is None:
             return None

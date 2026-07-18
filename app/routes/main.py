@@ -108,6 +108,24 @@ async def search_videos(q: str, limit: int = 10):
     return results
 
 
+@router.get("/api/subtitles/{video_id}")
+async def get_subtitles(video_id: str, lang: str = "en"):
+    """Return WebVTT subtitle content for a video.
+
+    Response is text/vtt so it can be loaded directly as a <track> src.
+    Returns 204 with no body when no subtitles are available so the
+    player can silently skip them.
+    """
+    content = await youtube_service.get_subtitles(video_id, lang)
+    if not content:
+        return Response(status_code=204)
+    return Response(
+        content=content,
+        media_type="text/vtt",
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 @router.get("/api/stream/{video_id}")
 async def get_stream_url(video_id: str, quality: int = None):
     format_data = youtube_service.get_format_with_headers(video_id, quality)
